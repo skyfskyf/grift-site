@@ -15,6 +15,13 @@ use ratzilla::WebRenderer;
 use tachyonfx::fx::{self};
 use tachyonfx::{Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion, SimpleRng};
 
+/// Approximate pixel width of a single terminal cell in the DomBackend.
+/// Ratzilla uses window_width / 10 for column count.
+const PIXELS_PER_COLUMN: u32 = 10;
+/// Approximate pixel height of a single terminal cell in the DomBackend.
+/// Ratzilla uses window_height / 20 for row count.
+const PIXELS_PER_ROW: u32 = 20;
+
 const BANNER: &str = r#"
  ██████╗  ██████╗ ██╗     ██████╗    ███████╗██╗██╗    ██╗   ██╗███████╗██████╗
 ██╔════╝ ██╔═══██╗██║     ██╔══██╗   ██╔════╝██║██║    ██║   ██║██╔════╝██╔══██╗
@@ -345,9 +352,8 @@ impl App {
     fn handle_mouse_event(&mut self, event: MouseEvent) {
         if event.event == MouseEventKind::Pressed && event.button == MouseButton::Left {
             // Convert pixel coordinates to terminal grid coordinates
-            // Ratzilla uses ~10px per column, ~20px per row for DomBackend
-            let col = (event.x / 10) as u16;
-            let row = (event.y / 20) as u16;
+            let col = (event.x / PIXELS_PER_COLUMN) as u16;
+            let row = (event.y / PIXELS_PER_ROW) as u16;
 
             // Check tab clicks
             if row >= self.tab_area.y && row < self.tab_area.bottom() {
