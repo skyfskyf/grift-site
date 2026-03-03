@@ -8,16 +8,16 @@ use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
 use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
 use ratzilla::ratatui::Frame;
-use ratzilla::{CanvasBackend, WebGl2Backend};
+use ratzilla::{DomBackend, WebGl2Backend};
 use ratzilla::WebRenderer;
 
 use tachyonfx::fx::{self};
-use tachyonfx::{Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion, SimpleRng};
+use tachyonfx::{CellFilter, Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion};
 
 const TRAIL_INITIAL_INTENSITY: u8 = 200;
 const MAX_TRAIL_LENGTH: usize = 30;
 const TRAIL_FADE_RATE: u8 = 8;
-const CURSOR_BLINK_RATE: u64 = 30;
+const CURSOR_BLINK_RATE: u64 = 60;
 
 const BANNER: &str = r#"
   ██████╗ ██████╗ ██╗███████╗████████╗   ██████╗ ███████╗
@@ -251,7 +251,6 @@ struct App {
     // TachyonFX
     transition_effect: Option<Effect>,
     bg_tick: u64,
-    rng: SimpleRng,
     last_frame: web_time::Instant,
     // Grid dimensions (updated each frame from frame.area())
     grid_cols: u16,
@@ -274,6 +273,10 @@ struct App {
     doc_nav_next: Rect,
     // Button effects
     btn_effects: Vec<(Rect, Effect)>,
+    // Tab glow effect
+    tab_glow_effect: Option<Effect>,
+    // Banner glow effect
+    banner_glow_effect: Option<Effect>,
 }
 
 impl App {
@@ -290,7 +293,6 @@ impl App {
             blog_index: 0,
             transition_effect: None,
             bg_tick: 0,
-            rng: SimpleRng::default(),
             last_frame: web_time::Instant::now(),
             grid_cols: 0,
             grid_rows: 0,
@@ -307,44 +309,40 @@ impl App {
             doc_nav_prev: Rect::default(),
             doc_nav_next: Rect::default(),
             btn_effects: Vec::new(),
+            tab_glow_effect: None,
+            banner_glow_effect: None,
         }
     }
 
     fn trigger_transition(&mut self) {
-        let variant = self.rng.gen() % 6;
         let dark = Color::Rgb(8, 9, 14);
-        let effect = match variant {
-            0 => fx::fade_from(
+        let effect = match self.page {
+            Page::Home => fx::fade_from(
                 dark,
                 dark,
                 EffectTimer::from_ms(400, Interpolation::CubicOut),
             ),
-            1 => fx::sweep_in(
+            Page::Repl => fx::sweep_in(
                 Motion::LeftToRight,
                 10,
                 3,
                 dark,
                 EffectTimer::from_ms(500, Interpolation::QuadOut),
             ),
-            2 => fx::sweep_in(
-                Motion::UpToDown,
-                8,
-                2,
-                dark,
-                EffectTimer::from_ms(500, Interpolation::QuadOut),
-            ),
-            3 => fx::coalesce(EffectTimer::from_ms(400, Interpolation::SineOut)),
-            4 => fx::slide_in(
+            Page::Docs => fx::slide_in(
                 Motion::RightToLeft,
                 8,
                 3,
                 dark,
                 EffectTimer::from_ms(500, Interpolation::CubicOut),
             ),
-            _ => fx::fade_from(
-                Color::Rgb(12, 14, 22),
+            Page::Blog => fx::coalesce(EffectTimer::from_ms(400, Interpolation::SineOut)),
+            Page::Links => fx::sweep_in(
+                Motion::UpToDown,
+                8,
+                2,
                 dark,
-                EffectTimer::from_ms(350, Interpolation::Linear),
+                EffectTimer::from_ms(500, Interpolation::QuadOut),
             ),
         };
         self.transition_effect = Some(effect);
@@ -353,15 +351,24 @@ impl App {
     fn switch_page(&mut self, page: Page) {
         if self.page != page {
             self.page = page;
+            self.tab_glow_effect = None; // Reset so it restarts on new tab
             self.trigger_transition();
         }
     }
 
     fn trigger_btn_effect(&mut self, area: Rect) {
         let effect = fx::fade_from(
-            Color::Rgb(180, 185, 200),
+            Color::Rgb(140, 145, 160),
             Color::Rgb(30, 35, 50),
-            EffectTimer::from_ms(500, Interpolation::CubicOut),
+            EffectTimer::from_ms(400, Interpolation::CubicOut),
+        );
+        self.btn_effects.push((area, effect));
+    }
+
+    fn trigger_link_effect(&mut self, area: Rect) {
+        let effect = fx::hsl_shift_fg(
+            [20.0, 10.0, 15.0],
+            (300, Interpolation::SineOut),
         );
         self.btn_effects.push((area, effect));
     }
@@ -461,7 +468,7 @@ impl App {
                         && row < area.bottom()
                     {
                         if let Some((_, url)) = LINKS.get(i) {
-                            self.trigger_btn_effect(*area);
+                            self.trigger_link_effect(*area);
                             self.trigger_transition();
                             open_url(url);
                             return;
@@ -665,6 +672,21 @@ impl App {
 
         self.render_tabs(frame, tab_area);
 
+        // Render fire glow effect on the selected tab
+        if let Some(selected_tab_rect) = self.tab_rects.get(self.page.index()).copied() {
+            if self.tab_glow_effect.is_none() {
+                // Subtle warm hsl shift that ping-pongs for a fire-like glow
+                let fg_shift = [-330.0, 15.0, 10.0];
+                let timer = (1200, Interpolation::SineIn);
+                let glow = fx::hsl_shift_fg(fg_shift, timer)
+                    .with_filter(CellFilter::Text);
+                self.tab_glow_effect = Some(fx::repeating(fx::ping_pong(glow)));
+            }
+            if let Some(ref mut effect) = self.tab_glow_effect {
+                frame.render_effect(effect, selected_tab_rect, elapsed);
+            }
+        }
+
         match self.page {
             Page::Home => self.render_home(frame, content_area),
             Page::Repl => self.render_repl(frame, content_area),
@@ -696,6 +718,21 @@ impl App {
                 false
             }
         });
+
+        // Subtle continuous glow on banner when on Home page
+        if self.page == Page::Home {
+            if self.banner_glow_effect.is_none() {
+                let fg_shift = [-330.0, 10.0, 8.0];
+                let timer = (2000, Interpolation::SineIn);
+                let glow = fx::hsl_shift_fg(fg_shift, timer)
+                    .with_filter(CellFilter::Text);
+                self.banner_glow_effect = Some(fx::repeating(fx::ping_pong(glow)));
+            }
+            if let Some(ref mut effect) = self.banner_glow_effect {
+                // Apply to the content area (banner is at the top)
+                frame.render_effect(effect, content_area, elapsed);
+            }
+        }
 
         // Render cursor trail
         if self.mouse_moving || !self.trail.is_empty() {
@@ -1162,7 +1199,7 @@ impl App {
         };
 
         frame.render_widget(
-            Paragraph::new(" [◄ Prev]").style(prev_style).block(
+            Paragraph::new(" [< Prev]").style(prev_style).block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
                     .border_style(prev_border),
@@ -1181,7 +1218,7 @@ impl App {
             info_area,
         );
         frame.render_widget(
-            Paragraph::new(" [Next ►]").style(next_style).block(
+            Paragraph::new(" [Next >]").style(next_style).block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
                     .border_style(next_border),
@@ -1245,9 +1282,9 @@ impl App {
                     Style::default().fg(Color::Rgb(140, 145, 155))
                 };
                 let marker = if i == self.blog_index {
-                    "▶ "
+                    "> "
                 } else if hovered {
-                    "▷ "
+                    "~ "
                 } else {
                     "  "
                 };
@@ -1335,7 +1372,7 @@ impl App {
                     Style::default()
                         .fg(Color::Rgb(160, 175, 195))
                 };
-                let marker = if hovered { "▶ " } else { "  " };
+                let marker = if hovered { "> " } else { "  " };
                 let text = Paragraph::new(format!("{marker}{label}")).style(style);
                 frame.render_widget(text, link_area);
                 self.link_areas.push(link_area);
@@ -1411,7 +1448,7 @@ fn main() -> std::io::Result<()> {
         let terminal = ratzilla::ratatui::Terminal::new(backend)?;
         setup_terminal!(terminal, app);
     } else {
-        let backend = CanvasBackend::new().expect("failed to create Canvas backend");
+        let backend = DomBackend::new().expect("failed to create DOM backend");
         let terminal = ratzilla::ratatui::Terminal::new(backend)?;
         setup_terminal!(terminal, app);
     }
