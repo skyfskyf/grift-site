@@ -8,7 +8,8 @@ use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
 use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
 use ratzilla::ratatui::Frame;
-use ratzilla::DomBackend;
+use ratzilla::backend::webgl2::WebGl2BackendOptions;
+use ratzilla::WebGl2Backend;
 use ratzilla::WebRenderer;
 
 use tachyonfx::fx::{self};
@@ -1492,7 +1493,7 @@ fn main() -> std::io::Result<()> {
 
     let app = Rc::new(RefCell::new(App::new()));
 
-    // Use DomBackend to enable text selection and copy/paste.
+    // Use WebGl2Backend with mouse selection for text select and copy/paste.
     macro_rules! setup_terminal {
         ($terminal:expr, $app:expr) => {{
             $terminal.on_key_event({
@@ -1510,7 +1511,9 @@ fn main() -> std::io::Result<()> {
         }};
     }
 
-    let backend = DomBackend::new().expect("failed to create DOM backend");
+    let options = WebGl2BackendOptions::new()
+        .enable_mouse_selection_with_mode(Default::default());
+    let backend = WebGl2Backend::new_with_options(options).expect("failed to create WebGL2 backend");
     let terminal = ratzilla::ratatui::Terminal::new(backend)?;
     setup_terminal!(terminal, app);
 
