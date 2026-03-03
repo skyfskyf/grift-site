@@ -210,7 +210,7 @@ struct App {
     repl_cursor: usize,
     repl_history: Vec<(String, String)>,
     repl_scroll: usize,
-    lisp: Lisp<50000>,
+    lisp: Box<Lisp<2000>>,
     // Docs state
     doc_page: usize,
     // Blog state
@@ -219,7 +219,7 @@ struct App {
 
 impl App {
     fn new() -> Self {
-        let lisp: Lisp<50000> = Lisp::new();
+        let lisp: Box<Lisp<2000>> = Box::new(Lisp::new());
         Self {
             page: Page::Home,
             repl_input: String::new(),
@@ -811,8 +811,7 @@ impl App {
 
         for (i, (_, url)) in LINKS.iter().enumerate() {
             let link = Hyperlink::new(*url);
-            let y_offset = i as i32;
-            let link_area = Rect::new(links_inner.x, links_inner.y + y_offset as u16, links_inner.width, 1);
+            let link_area = Rect::new(links_inner.x, links_inner.y + i as u16, links_inner.width, 1);
             if link_area.y < links_inner.bottom() {
                 frame.render_widget(link, link_area);
             }
