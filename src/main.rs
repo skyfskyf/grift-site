@@ -627,13 +627,13 @@ impl App {
         // Tabs widget renders: padding(1) + title_line + padding(1) for each tab,
         // separated by a divider. The block border adds 1 column on each side.
         let divider_width: u16 = 3; // " │ "
-        let tab_padding: u16 = 2; // 1 space padding on each side added by Tabs widget
+        let tab_padding: u16 = 2; // Tabs widget adds 1 space on each side (total 2)
         let inner_x = area.x + 1; // skip left border
         let tab_row = area.y + 1; // the tabs render on the second row (inside border)
         self.tab_rects.clear();
         let mut pos = inner_x;
         for p in &Page::ALL {
-            let title_len = p.title().len() as u16 + 2; // " " + title + " " from our Line
+            let title_len = p.title().len() as u16 + 2; // title text + 2 spaces from Line(" " + title + " ")
             let total = title_len + tab_padding;
             self.tab_rects.push(Rect::new(pos, tab_row, total, 1));
             pos += total + divider_width;
