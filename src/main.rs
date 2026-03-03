@@ -8,26 +8,19 @@ use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
 use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
 use ratzilla::ratatui::Frame;
-use ratzilla::DomBackend;
+use ratzilla::{CanvasBackend, WebGl2Backend};
 use ratzilla::WebRenderer;
 
 use tachyonfx::fx::{self};
 use tachyonfx::{Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion, SimpleRng};
 
 const BANNER: &str = r#"
- ██████╗  ██████╗ ██╗     ██████╗    ███████╗██╗██╗    ██╗   ██╗███████╗██████╗
-██╔════╝ ██╔═══██╗██║     ██╔══██╗   ██╔════╝██║██║    ██║   ██║██╔════╝██╔══██╗
-██║  ███╗██║   ██║██║     ██║  ██║   ███████╗██║██║    ██║   ██║█████╗  ██████╔╝
-██║   ██║██║   ██║██║     ██║  ██║   ╚════██║██║██║    ╚██╗ ██╔╝██╔══╝  ██╔══██╗
-╚██████╔╝╚██████╔╝███████╗██████╔╝██╗███████║██║███████╗╚████╔╝ ███████╗██║  ██║
- ╚═════╝  ╚═════╝ ╚══════╝╚═════╝ ╚═╝╚══════╝╚═╝╚══════╝ ╚═══╝  ╚══════╝╚═╝  ╚═╝
-
-                       ██████╗ ██████╗ ██████╗ ██████╗ ███████╗██████╗
-                      ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
-                      ██║     ██║   ██║██████╔╝██████╔╝█████╗  ██████╔╝
-                      ██║     ██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██╔══██╗
-                      ╚██████╗╚██████╔╝██║     ██║     ███████╗██║  ██║
-                       ╚═════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═╝
+  ██████╗ ██████╗ ██╗███████╗████████╗   ██████╗ ███████╗
+ ██╔════╝ ██╔══██╗██║██╔════╝╚══██╔══╝   ██╔══██╗██╔════╝
+ ██║  ███╗██████╔╝██║█████╗     ██║      ██████╔╝███████╗
+ ██║   ██║██╔══██╗██║██╔══╝     ██║      ██╔══██╗╚════██║
+ ╚██████╔╝██║  ██║██║██║        ██║   ██╗██║  ██║███████║
+  ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   ╚═╝╚═╝  ╚═╝╚══════╝
 "#;
 
 const DESCRIPTION: &str = "\
@@ -35,11 +28,11 @@ const DESCRIPTION: &str = "\
 \n\
 Software developer • Rust enthusiast • Language designer\n\
 \n\
+Interests: programming languages, NLP, AI, game dev, web dev.\n\
+\n\
 Creator of Grift — a minimalistic Lisp implementing vau calculus.\n\
 Features: no_std, no_alloc, arena-allocated, tail-call optimized,\n\
-mark-and-sweep GC, and zero unsafe code.\n\
-\n\
-This terminal-themed site is built with Ratzilla + TachyonFX + WebAssembly.";
+mark-and-sweep GC, and zero unsafe code.";
 
 const LINKS: &[(&str, &str)] = &[
     (
@@ -51,9 +44,10 @@ const LINKS: &[(&str, &str)] = &[
         "GitHub (grift-site)",
         "https://github.com/skyfskyf/grift-site",
     ),
-    ("Ratzilla", "https://github.com/ratatui/ratzilla"),
-    ("Ratatui", "https://github.com/ratatui/ratatui"),
-    ("TachyonFX", "https://github.com/ratatui/tachyonfx"),
+    ("Ratzilla – Terminal web apps with Rust + WASM", "https://github.com/ratatui/ratzilla"),
+    ("Ratatui – Terminal UI framework", "https://github.com/ratatui/ratatui"),
+    ("TachyonFX – Shader-like effects for TUIs", "https://github.com/ratatui/tachyonfx"),
+    ("WebAssembly", "https://webassembly.org"),
 ];
 
 const DOC_BASICS: &str = "\
@@ -260,6 +254,12 @@ struct App {
     // Mouse hover position in grid coordinates
     hover_col: u16,
     hover_row: u16,
+    // Mouse trail state
+    trail: Vec<(u16, u16, u8)>, // (col, row, intensity)
+    mouse_moving: bool,
+    mouse_idle_ticks: u16,
+    // Cursor blink
+    cursor_blink_tick: u64,
     // Clickable area tracking
     tab_area: Rect,
     tab_rects: Vec<Rect>,
@@ -291,6 +291,10 @@ impl App {
             grid_rows: 0,
             hover_col: 0,
             hover_row: 0,
+            trail: Vec::new(),
+            mouse_moving: false,
+            mouse_idle_ticks: 0,
+            cursor_blink_tick: 0,
             tab_area: Rect::default(),
             tab_rects: Vec::new(),
             link_areas: Vec::new(),
@@ -350,9 +354,9 @@ impl App {
 
     fn trigger_btn_effect(&mut self, area: Rect) {
         let effect = fx::fade_from(
-            Color::Rgb(200, 200, 210),
-            Color::Rgb(8, 9, 14),
-            EffectTimer::from_ms(350, Interpolation::CubicOut),
+            Color::Rgb(180, 185, 200),
+            Color::Rgb(30, 35, 50),
+            EffectTimer::from_ms(500, Interpolation::CubicOut),
         );
         self.btn_effects.push((area, effect));
     }
@@ -366,7 +370,7 @@ impl App {
 
     fn handle_key_event(&mut self, key: KeyEvent) {
         match self.page {
-            Page::Repl => self.handle_repl_event(key),
+            Page::Home | Page::Repl => self.handle_repl_event(key),
             Page::Docs => self.handle_docs_event(key),
             Page::Blog => self.handle_blog_event(key),
             _ => {}
@@ -407,8 +411,22 @@ impl App {
         }
 
         // Update hover position on any mouse event
+        let prev_col = self.hover_col;
+        let prev_row = self.hover_row;
         self.hover_col = col;
         self.hover_row = row;
+
+        // Track mouse movement for cursor trail
+        if col != prev_col || row != prev_row {
+            self.mouse_moving = true;
+            self.mouse_idle_ticks = 0;
+            // Add trail point
+            self.trail.push((col, row, 200));
+            // Keep trail limited
+            if self.trail.len() > 30 {
+                self.trail.remove(0);
+            }
+        }
 
         if event.event == MouseEventKind::Pressed && event.button == MouseButton::Left {
 
@@ -597,6 +615,18 @@ impl App {
         let elapsed = Duration::from_millis(elapsed_std.as_millis() as u32);
 
         self.bg_tick = self.bg_tick.wrapping_add(1);
+        self.cursor_blink_tick = self.cursor_blink_tick.wrapping_add(1);
+
+        // Decay mouse trail
+        self.mouse_idle_ticks = self.mouse_idle_ticks.saturating_add(1);
+        if self.mouse_idle_ticks > 3 {
+            self.mouse_moving = false;
+        }
+        // Fade trail points
+        self.trail.retain_mut(|(_, _, intensity)| {
+            *intensity = intensity.saturating_sub(8);
+            *intensity > 0
+        });
 
         // Render background animation across entire area
         self.render_background(frame);
@@ -661,6 +691,26 @@ impl App {
                 false
             }
         });
+
+        // Render cursor trail
+        if self.mouse_moving || !self.trail.is_empty() {
+            let buf = frame.buffer_mut();
+            for &(tx, ty, intensity) in &self.trail {
+                let pos = Position::new(tx, ty);
+                if let Some(cell) = buf.cell_mut(pos) {
+                    let boost = (intensity as u16 / 8) as u8;
+                    let (r, g, b) = match cell.bg {
+                        Color::Rgb(r, g, b) => (r, g, b),
+                        _ => (8, 9, 14),
+                    };
+                    cell.set_bg(Color::Rgb(
+                        r.saturating_add(boost / 2),
+                        g.saturating_add(boost / 2),
+                        b.saturating_add(boost),
+                    ));
+                }
+            }
+        }
     }
 
     fn render_background(&self, frame: &mut Frame) {
@@ -743,7 +793,7 @@ impl App {
                 Block::bordered()
                     .border_type(BorderType::Rounded)
                     .border_style(Color::Rgb(55, 60, 70))
-                    .title(" gold.silver.copper ")
+                    .title(" GRIFT.RS ")
                     .title_style(Style::default().fg(Color::Rgb(207, 181, 59)).bold()),
             )
             .select(self.page.index())
@@ -752,7 +802,7 @@ impl App {
                 Style::default()
                     .fg(Color::Rgb(230, 232, 240))
                     .bold()
-                    .add_modifier(Modifier::UNDERLINED),
+                    .add_modifier(Modifier::REVERSED),
             )
             .divider(" │ ");
 
@@ -775,10 +825,10 @@ impl App {
         let banner_height = BANNER.lines().count() as u16;
         let desc_lines = DESCRIPTION.lines().count() as u16;
 
-        let [banner_area, desc_area, nav_area] = Layout::vertical([
+        let [banner_area, desc_area, repl_area] = Layout::vertical([
             Constraint::Length(banner_height),
             Constraint::Length(desc_lines + 2),
-            Constraint::Min(3),
+            Constraint::Min(5),
         ])
         .areas(inner);
 
@@ -800,37 +850,8 @@ impl App {
             );
         frame.render_widget(desc, desc_area);
 
-        // Navigation help
-        let nav_text = Text::from(vec![
-            Line::from(""),
-            Line::from(vec![
-                "  Click the ".fg(Color::Rgb(100, 105, 115)),
-                "tabs above".fg(Color::Rgb(200, 200, 210)).bold(),
-                " to navigate between pages".fg(Color::Rgb(100, 105, 115)),
-            ]),
-            Line::from(vec![
-                "  Try the ".fg(Color::Rgb(100, 105, 115)),
-                "REPL".fg(Color::Rgb(184, 115, 51)).bold(),
-                " to evaluate Grift expressions interactively"
-                    .fg(Color::Rgb(100, 105, 115)),
-            ]),
-            Line::from(vec![
-                "  All ".fg(Color::Rgb(100, 105, 115)),
-                "links".fg(Color::Rgb(170, 175, 185)).bold(),
-                " and ".fg(Color::Rgb(100, 105, 115)),
-                "buttons".fg(Color::Rgb(170, 175, 185)).bold(),
-                " are clickable".fg(Color::Rgb(100, 105, 115)),
-            ]),
-        ]);
-        frame.render_widget(
-            Paragraph::new(nav_text).block(
-                Block::bordered()
-                    .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(40, 44, 52))
-                    .title(" Navigation ".bold().fg(Color::Rgb(200, 200, 210))),
-            ),
-            nav_area,
-        );
+        // Minimal REPL embedded at bottom
+        self.render_mini_repl(frame, repl_area);
     }
 
     fn render_repl(&self, frame: &mut Frame, area: Rect) {
@@ -904,11 +925,87 @@ impl App {
             );
         frame.render_widget(input, input_area);
 
-        // Cursor position
-        let cursor_x = input_area.x + 1 + 7 + self.repl_cursor as u16;
-        let cursor_y = input_area.y + 1;
-        if cursor_x < input_area.right() - 1 {
-            frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+        // Blinking block cursor
+        self.render_blinking_cursor(frame, input_area.x + 1 + 7 + self.repl_cursor as u16, input_area.y + 1, input_area.right() - 1);
+    }
+
+    fn render_mini_repl(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Color::Rgb(40, 44, 52))
+            .title(" Try Grift ".bold().fg(Color::Rgb(184, 115, 51)))
+            .title_bottom(
+                Line::from("│ type an expression and press Enter │")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Rgb(55, 60, 70))),
+            );
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let [history_area, input_area] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+
+        // Show last few history lines
+        let mut history_lines: Vec<Line> = Vec::new();
+        if self.repl_history.is_empty() {
+            history_lines.push(Line::from(
+                "  Try: (+ 1 2), (list 1 2 3), (define! x 42)"
+                    .fg(Color::Rgb(100, 105, 115)),
+            ));
+        } else {
+            for (input, output) in self.repl_history.iter().rev().take(3).rev() {
+                history_lines.push(Line::from(vec![
+                    Span::styled(
+                        "grift> ",
+                        Style::default().fg(Color::Rgb(184, 115, 51)).bold(),
+                    ),
+                    Span::styled(input.as_str(), Style::default().fg(Color::Rgb(200, 200, 210))),
+                ]));
+                history_lines.push(Line::from(vec![Span::styled(
+                    format!("  => {output}"),
+                    Style::default().fg(Color::Rgb(160, 165, 175)),
+                )]));
+            }
+        }
+
+        let visible_height = history_area.height as usize;
+        let total_lines = history_lines.len();
+        let skip = total_lines.saturating_sub(visible_height);
+
+        let history = Paragraph::new(Text::from(history_lines)).scroll((skip as u16, 0));
+        frame.render_widget(history, history_area);
+
+        // Input line
+        let input_display = format!("grift> {}", self.repl_input);
+        let input = Paragraph::new(input_display.as_str())
+            .style(Style::default().fg(Color::Rgb(200, 200, 210)));
+        frame.render_widget(input, input_area);
+
+        // Blinking block cursor
+        self.render_blinking_cursor(frame, input_area.x + 7 + self.repl_cursor as u16, input_area.y, input_area.right());
+    }
+
+    fn render_blinking_cursor(&self, frame: &mut Frame, cursor_x: u16, cursor_y: u16, max_x: u16) {
+        if cursor_x < max_x {
+            // Slow blink: visible ~60% of the time
+            let blink_on = (self.cursor_blink_tick / 30) % 2 == 0;
+            if blink_on {
+                let buf = frame.buffer_mut();
+                let pos = Position::new(cursor_x, cursor_y);
+                if let Some(cell) = buf.cell_mut(pos) {
+                    // Reverse the cell to show cursor position
+                    let fg = cell.fg;
+                    let bg = cell.bg;
+                    cell.set_fg(bg);
+                    cell.set_bg(fg);
+                    // Ensure visible even on empty cells
+                    if cell.symbol() == " " || cell.symbol().is_empty() {
+                        cell.set_bg(Color::Rgb(200, 200, 210));
+                        cell.set_fg(Color::Rgb(8, 9, 14));
+                    }
+                }
+            }
         }
     }
 
@@ -1027,7 +1124,7 @@ impl App {
             Style::default()
                 .fg(Color::Rgb(255, 255, 255))
                 .bold()
-                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::REVERSED)
         } else if self.doc_page > 0 {
             Style::default().fg(Color::Rgb(200, 200, 210)).bold()
         } else {
@@ -1037,7 +1134,7 @@ impl App {
             Style::default()
                 .fg(Color::Rgb(255, 255, 255))
                 .bold()
-                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::REVERSED)
         } else if self.doc_page < 2 {
             Style::default().fg(Color::Rgb(200, 200, 210)).bold()
         } else {
@@ -1228,11 +1325,10 @@ impl App {
                     Style::default()
                         .fg(Color::Rgb(255, 255, 255))
                         .bold()
-                        .add_modifier(Modifier::UNDERLINED)
+                        .add_modifier(Modifier::REVERSED)
                 } else {
                     Style::default()
                         .fg(Color::Rgb(160, 175, 195))
-                        .add_modifier(Modifier::UNDERLINED)
                 };
                 let marker = if hovered { "▶ " } else { "  " };
                 let text = Paragraph::new(format!("{marker}{label}")).style(style);
@@ -1241,7 +1337,7 @@ impl App {
             }
         }
 
-        // Info section
+        // Info section — technical details about the site
         let info_text = Text::from(vec![
             Line::from(""),
             Line::from(vec![
@@ -1253,16 +1349,6 @@ impl App {
             Line::from(vec![
                 "  Grift ".fg(Color::Rgb(184, 115, 51)).bold(),
                 "– A minimalistic Lisp implementing vau calculus"
-                    .fg(Color::Rgb(140, 145, 155)),
-            ]),
-            Line::from(vec![
-                "  Ratzilla ".fg(Color::Rgb(170, 175, 185)).bold(),
-                "– Terminal-themed web apps with Rust + WASM"
-                    .fg(Color::Rgb(140, 145, 155)),
-            ]),
-            Line::from(vec![
-                "  TachyonFX ".fg(Color::Rgb(170, 175, 185)).bold(),
-                "– Shader-like effects for terminal UIs"
                     .fg(Color::Rgb(140, 145, 155)),
             ]),
             Line::from(""),
@@ -1296,31 +1382,57 @@ fn open_url(url: &str) {
 fn main() -> std::io::Result<()> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
 
-    let backend = DomBackend::new().expect("failed to create DOM backend");
-    let terminal = ratzilla::ratatui::Terminal::new(backend)?;
-
     let app = Rc::new(RefCell::new(App::new()));
 
-    terminal.on_key_event({
-        let app = app.clone();
-        move |key_event| {
-            app.borrow_mut().handle_key_event(key_event);
-        }
-    });
+    // Try WebGL2 first, fall back to Canvas. Never use DOM.
+    if let Ok(backend) = WebGl2Backend::new() {
+        let terminal = ratzilla::ratatui::Terminal::new(backend)?;
 
-    terminal.on_mouse_event({
-        let app = app.clone();
-        move |mouse_event| {
-            app.borrow_mut().handle_mouse_event(mouse_event);
-        }
-    });
+        terminal.on_key_event({
+            let app = app.clone();
+            move |key_event| {
+                app.borrow_mut().handle_key_event(key_event);
+            }
+        });
 
-    terminal.draw_web({
-        let app = app.clone();
-        move |frame| {
-            app.borrow_mut().draw(frame);
-        }
-    });
+        terminal.on_mouse_event({
+            let app = app.clone();
+            move |mouse_event| {
+                app.borrow_mut().handle_mouse_event(mouse_event);
+            }
+        });
+
+        terminal.draw_web({
+            let app = app.clone();
+            move |frame| {
+                app.borrow_mut().draw(frame);
+            }
+        });
+    } else {
+        let backend = CanvasBackend::new().expect("failed to create Canvas backend");
+        let terminal = ratzilla::ratatui::Terminal::new(backend)?;
+
+        terminal.on_key_event({
+            let app = app.clone();
+            move |key_event| {
+                app.borrow_mut().handle_key_event(key_event);
+            }
+        });
+
+        terminal.on_mouse_event({
+            let app = app.clone();
+            move |mouse_event| {
+                app.borrow_mut().handle_mouse_event(mouse_event);
+            }
+        });
+
+        terminal.draw_web({
+            let app = app.clone();
+            move |frame| {
+                app.borrow_mut().draw(frame);
+            }
+        });
+    }
 
     Ok(())
 }
