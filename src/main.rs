@@ -2,33 +2,58 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use grift::Lisp;
-use ratzilla::event::{KeyCode, KeyEvent};
+use ratzilla::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratzilla::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
-use ratzilla::ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Tabs, Wrap};
-use ratzilla::ratatui::{Frame, Terminal};
+use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
+use ratzilla::ratatui::Frame;
 use ratzilla::widgets::Hyperlink;
-use ratzilla::{DomBackend, WebRenderer};
+use ratzilla::DomBackend;
+use ratzilla::WebRenderer;
+
+use tachyonfx::fx::{self};
+use tachyonfx::{Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion, SimpleRng};
+
+/// Approximate pixel width of a single terminal cell in the DomBackend.
+/// Ratzilla uses window_width / 10 for column count.
+const PIXELS_PER_COLUMN: u32 = 10;
+/// Approximate pixel height of a single terminal cell in the DomBackend.
+/// Ratzilla uses window_height / 20 for row count.
+const PIXELS_PER_ROW: u32 = 20;
 
 const BANNER: &str = r#"
-   ██████╗ ██████╗ ██╗███████╗████████╗
-  ██╔════╝ ██╔══██╗██║██╔════╝╚══██╔══╝
-  ██║  ███╗██████╔╝██║█████╗     ██║   
-  ██║   ██║██╔══██╗██║██╔══╝     ██║   
-  ╚██████╔╝██║  ██║██║██║        ██║   
-   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   
+ ██████╗  ██████╗ ██╗     ██████╗    ███████╗██╗██╗    ██╗   ██╗███████╗██████╗
+██╔════╝ ██╔═══██╗██║     ██╔══██╗   ██╔════╝██║██║    ██║   ██║██╔════╝██╔══██╗
+██║  ███╗██║   ██║██║     ██║  ██║   ███████╗██║██║    ██║   ██║█████╗  ██████╔╝
+██║   ██║██║   ██║██║     ██║  ██║   ╚════██║██║██║    ╚██╗ ██╔╝██╔══╝  ██╔══██╗
+╚██████╔╝╚██████╔╝███████╗██████╔╝██╗███████║██║███████╗╚████╔╝ ███████╗██║  ██║
+ ╚═════╝  ╚═════╝ ╚══════╝╚═════╝ ╚═╝╚══════╝╚═╝╚══════╝ ╚═══╝  ╚══════╝╚═╝  ╚═╝
+
+                       ██████╗ ██████╗ ██████╗ ██████╗ ███████╗██████╗
+                      ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
+                      ██║     ██║   ██║██████╔╝██████╔╝█████╗  ██████╔╝
+                      ██║     ██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██╔══██╗
+                      ╚██████╗╚██████╔╝██║     ██║     ███████╗██║  ██║
+                       ╚═════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝  ╚═╝
 "#;
 
 const DESCRIPTION: &str = "\
->_ Grift is a minimalistic Lisp interpreter implementing vau calculus.\n\
+>_ Personal website of gold.silver.copper\n\
 \n\
+Software developer • Rust enthusiast • Language designer\n\
+\n\
+Creator of Grift — a minimalistic Lisp implementing vau calculus.\n\
 Features: no_std, no_alloc, arena-allocated, tail-call optimized,\n\
 mark-and-sweep GC, and zero unsafe code.\n\
 \n\
-Built for embedded systems and the web with Ratzilla + WebAssembly.";
+This terminal-themed site is built with Ratzilla + TachyonFX + WebAssembly.";
 
 const LINKS: &[(&str, &str)] = &[
+    (
+        "GitHub (gold-silver-copper)",
+        "https://github.com/gold-silver-copper",
+    ),
     ("GitHub (grift)", "https://github.com/skyfskyf/grift"),
     (
         "GitHub (grift-site)",
@@ -36,6 +61,7 @@ const LINKS: &[(&str, &str)] = &[
     ),
     ("Ratzilla", "https://github.com/ratatui/ratzilla"),
     ("Ratatui", "https://github.com/ratatui/ratatui"),
+    ("TachyonFX", "https://github.com/ratatui/tachyonfx"),
 ];
 
 const DOC_BASICS: &str = "\
@@ -138,28 +164,31 @@ Type checking:\n\
 
 const BLOG_ENTRIES: &[(&str, &str, &str)] = &[
     (
-        "Welcome to Grift",
+        "Welcome to gold.silver.copper",
         "2025-01-15",
-        "Grift is a minimalistic Lisp interpreter built in Rust.\n\
-         It implements Kernel-style vau calculus with first-class\n\
+        "Hi! I'm gold.silver.copper — a software developer passionate\n\
+         about programming languages, systems programming, and Rust.\n\
+         \n\
+         This site serves as my personal blog, project showcase, and\n\
+         an interactive demo of Grift, my Lisp interpreter.\n\
+         \n\
+         Everything you see here is rendered as a terminal UI in your\n\
+         browser using Ratzilla + TachyonFX + WebAssembly.",
+    ),
+    (
+        "Building Grift: A Minimalistic Lisp",
+        "2025-02-01",
+        "Grift implements Kernel-style vau calculus with first-class\n\
          operatives that subsume both functions and macros.\n\
          \n\
          Key design goals:\n\
          - Zero unsafe code (#![forbid(unsafe_code)])\n\
          - No heap allocation (arena-only memory)\n\
          - Runs on bare-metal embedded systems\n\
-         - Compiles to WebAssembly",
-    ),
-    (
-        "Arena Allocation in Grift",
-        "2025-02-01",
-        "All values in Grift live in a fixed-size arena with\n\
-         const-generic capacity. This means no Vec, String, or\n\
-         Box - just a flat array of slots.\n\
+         - Compiles to WebAssembly\n\
          \n\
-         The arena supports mark-and-sweep garbage collection\n\
-         triggered automatically at 75% occupancy, with explicit\n\
-         collection via (gc-collect).",
+         All values live in a fixed-size arena with const-generic\n\
+         capacity and mark-and-sweep garbage collection.",
     ),
     (
         "Vau Calculus Explained",
@@ -167,12 +196,25 @@ const BLOG_ENTRIES: &[(&str, &str, &str)] = &[
         "Unlike traditional Lisps, Grift uses vau calculus where\n\
          operatives receive their arguments unevaluated along with\n\
          the caller's environment. This makes operatives strictly\n\
-         more powerful than macros - they can choose whether and\n\
+         more powerful than macros — they can choose whether and\n\
          when to evaluate each argument.\n\
          \n\
          ($vau (x) env-param body) creates an operative that\n\
          captures the formal parameter tree, environment parameter,\n\
          and body expression as a closure.",
+    ),
+    (
+        "Terminal UIs in the Browser",
+        "2025-04-20",
+        "This website is built entirely with Ratzilla, which brings\n\
+         Ratatui's terminal UI framework to the browser via WASM.\n\
+         \n\
+         TachyonFX adds shader-like visual effects — the background\n\
+         animation, page transitions, and link click effects are all\n\
+         powered by tachyonfx running in WebAssembly.\n\
+         \n\
+         No JavaScript framework. No DOM manipulation. Just Rust\n\
+         rendering a terminal buffer to a canvas element.",
     ),
 ];
 
@@ -215,6 +257,17 @@ struct App {
     doc_page: usize,
     // Blog state
     blog_index: usize,
+    // TachyonFX
+    transition_effect: Option<Effect>,
+    bg_tick: u64,
+    rng: SimpleRng,
+    last_frame: web_time::Instant,
+    // Clickable area tracking
+    tab_area: Rect,
+    link_areas: Vec<Rect>,
+    blog_item_areas: Vec<Rect>,
+    doc_nav_prev: Rect,
+    doc_nav_next: Rect,
 }
 
 impl App {
@@ -229,60 +282,156 @@ impl App {
             lisp,
             doc_page: 0,
             blog_index: 0,
+            transition_effect: None,
+            bg_tick: 0,
+            rng: SimpleRng::default(),
+            last_frame: web_time::Instant::now(),
+            tab_area: Rect::default(),
+            link_areas: Vec::new(),
+            blog_item_areas: Vec::new(),
+            doc_nav_prev: Rect::default(),
+            doc_nav_next: Rect::default(),
         }
     }
 
-    fn handle_event(&mut self, key: KeyEvent) {
+    fn trigger_transition(&mut self) {
+        let variant = self.rng.gen() % 6;
+        let effect = match variant {
+            0 => fx::fade_from(
+                Color::Black,
+                Color::Black,
+                EffectTimer::from_ms(400, Interpolation::CubicOut),
+            ),
+            1 => fx::sweep_in(
+                Motion::LeftToRight,
+                10,
+                3,
+                Color::Black,
+                EffectTimer::from_ms(500, Interpolation::QuadOut),
+            ),
+            2 => fx::sweep_in(
+                Motion::UpToDown,
+                8,
+                2,
+                Color::Black,
+                EffectTimer::from_ms(500, Interpolation::QuadOut),
+            ),
+            3 => fx::coalesce(EffectTimer::from_ms(400, Interpolation::SineOut)),
+            4 => fx::slide_in(
+                Motion::RightToLeft,
+                8,
+                3,
+                Color::Black,
+                EffectTimer::from_ms(500, Interpolation::CubicOut),
+            ),
+            _ => fx::fade_from(
+                Color::Rgb(0, 40, 0),
+                Color::Black,
+                EffectTimer::from_ms(350, Interpolation::Linear),
+            ),
+        };
+        self.transition_effect = Some(effect);
+    }
+
+    fn switch_page(&mut self, page: Page) {
+        if self.page != page {
+            self.page = page;
+            self.trigger_transition();
+        }
+    }
+
+    fn handle_key_event(&mut self, key: KeyEvent) {
         match self.page {
-            Page::Home => self.handle_home_event(key),
             Page::Repl => self.handle_repl_event(key),
             Page::Docs => self.handle_docs_event(key),
             Page::Blog => self.handle_blog_event(key),
-            Page::Links => self.handle_links_event(key),
+            _ => {}
         }
     }
 
-    fn handle_global_nav(&mut self, key: &KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Tab => {
-                let idx = self.page.index();
-                self.page = Page::ALL[(idx + 1) % Page::ALL.len()];
-                true
-            }
-            KeyCode::Char('1') if self.page != Page::Repl => {
-                self.page = Page::Home;
-                true
-            }
-            KeyCode::Char('2') if self.page != Page::Repl => {
-                self.page = Page::Repl;
-                true
-            }
-            KeyCode::Char('3') if self.page != Page::Repl => {
-                self.page = Page::Docs;
-                true
-            }
-            KeyCode::Char('4') if self.page != Page::Repl => {
-                self.page = Page::Blog;
-                true
-            }
-            KeyCode::Char('5') if self.page != Page::Repl => {
-                self.page = Page::Links;
-                true
-            }
-            _ => false,
-        }
-    }
+    fn handle_mouse_event(&mut self, event: MouseEvent) {
+        if event.event == MouseEventKind::Pressed && event.button == MouseButton::Left {
+            // Convert pixel coordinates to terminal grid coordinates
+            let col = (event.x / PIXELS_PER_COLUMN) as u16;
+            let row = (event.y / PIXELS_PER_ROW) as u16;
 
-    fn handle_home_event(&mut self, key: KeyEvent) {
-        self.handle_global_nav(&key);
+            // Check tab clicks
+            if row >= self.tab_area.y && row < self.tab_area.bottom() {
+                let tab_width = if self.tab_area.width > 0 {
+                    self.tab_area.width / Page::ALL.len() as u16
+                } else {
+                    0
+                };
+                if tab_width > 0 && col >= self.tab_area.x && col < self.tab_area.right() {
+                    let rel_x = col - self.tab_area.x;
+                    let tab_idx = (rel_x / tab_width) as usize;
+                    if tab_idx < Page::ALL.len() {
+                        self.switch_page(Page::ALL[tab_idx]);
+                        return;
+                    }
+                }
+            }
+
+            // Check link clicks on Links page
+            if self.page == Page::Links {
+                for (i, area) in self.link_areas.iter().enumerate() {
+                    if col >= area.x
+                        && col < area.right()
+                        && row >= area.y
+                        && row < area.bottom()
+                    {
+                        if let Some((_, url)) = LINKS.get(i) {
+                            self.trigger_transition();
+                            open_url(url);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Check blog item clicks
+            if self.page == Page::Blog {
+                for (i, area) in self.blog_item_areas.iter().enumerate() {
+                    if col >= area.x
+                        && col < area.right()
+                        && row >= area.y
+                        && row < area.bottom()
+                        && i < BLOG_ENTRIES.len()
+                        && self.blog_index != i
+                    {
+                        self.blog_index = i;
+                        self.trigger_transition();
+                        return;
+                    }
+                }
+            }
+
+            // Check doc navigation buttons
+            if self.page == Page::Docs {
+                if col >= self.doc_nav_prev.x
+                    && col < self.doc_nav_prev.right()
+                    && row >= self.doc_nav_prev.y
+                    && row < self.doc_nav_prev.bottom()
+                    && self.doc_page > 0
+                {
+                    self.doc_page -= 1;
+                    self.trigger_transition();
+                }
+                if col >= self.doc_nav_next.x
+                    && col < self.doc_nav_next.right()
+                    && row >= self.doc_nav_next.y
+                    && row < self.doc_nav_next.bottom()
+                    && self.doc_page < 2
+                {
+                    self.doc_page += 1;
+                    self.trigger_transition();
+                }
+            }
+        }
     }
 
     fn handle_repl_event(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Tab => {
-                let idx = self.page.index();
-                self.page = Page::ALL[(idx + 1) % Page::ALL.len()];
-            }
             KeyCode::Enter => {
                 if !self.repl_input.is_empty() {
                     let input = self.repl_input.clone();
@@ -299,7 +448,6 @@ impl App {
                     self.repl_history.push((input, result));
                     self.repl_input.clear();
                     self.repl_cursor = 0;
-                    // Auto-scroll to bottom
                     let total = self.repl_history.len() * 2;
                     self.repl_scroll = total;
                 }
@@ -338,16 +486,17 @@ impl App {
     }
 
     fn handle_docs_event(&mut self, key: KeyEvent) {
-        if self.handle_global_nav(&key) {
-            return;
-        }
         match key.code {
             KeyCode::Left => {
-                self.doc_page = self.doc_page.saturating_sub(1);
+                if self.doc_page > 0 {
+                    self.doc_page -= 1;
+                    self.trigger_transition();
+                }
             }
             KeyCode::Right => {
                 if self.doc_page < 2 {
                     self.doc_page += 1;
+                    self.trigger_transition();
                 }
             }
             _ => {}
@@ -355,24 +504,21 @@ impl App {
     }
 
     fn handle_blog_event(&mut self, key: KeyEvent) {
-        if self.handle_global_nav(&key) {
-            return;
-        }
         match key.code {
             KeyCode::Left | KeyCode::Up => {
-                self.blog_index = self.blog_index.saturating_sub(1);
+                if self.blog_index > 0 {
+                    self.blog_index -= 1;
+                    self.trigger_transition();
+                }
             }
             KeyCode::Right | KeyCode::Down => {
                 if self.blog_index < BLOG_ENTRIES.len() - 1 {
                     self.blog_index += 1;
+                    self.trigger_transition();
                 }
             }
             _ => {}
         }
-    }
-
-    fn handle_links_event(&mut self, key: KeyEvent) {
-        self.handle_global_nav(&key);
     }
 
     fn byte_index(&self) -> usize {
@@ -383,13 +529,19 @@ impl App {
             .unwrap_or(self.repl_input.len())
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        // Clear background
-        frame.render_widget(Clear, frame.area());
+    fn draw(&mut self, frame: &mut Frame) {
+        let now = web_time::Instant::now();
+        let elapsed_std = now - self.last_frame;
+        self.last_frame = now;
+        let elapsed = Duration::from_millis(elapsed_std.as_millis() as u32);
+
+        self.bg_tick = self.bg_tick.wrapping_add(1);
+
+        // Render background animation
+        self.render_background(frame);
 
         let main_area = frame.area();
 
-        // Layout: tabs at top, content below
         let [tab_area, content_area] =
             Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(main_area);
 
@@ -402,19 +554,70 @@ impl App {
             Page::Blog => self.render_blog(frame, content_area),
             Page::Links => self.render_links(frame, content_area),
         }
+
+        // Process transition effects
+        if let Some(ref mut effect) = self.transition_effect {
+            if effect.running() {
+                frame.render_effect(effect, content_area, elapsed);
+            }
+        }
+        if self
+            .transition_effect
+            .as_ref()
+            .is_some_and(|e| !e.running())
+        {
+            self.transition_effect = None;
+        }
     }
 
-    fn render_tabs(&self, frame: &mut Frame, area: Rect) {
+    fn render_background(&self, frame: &mut Frame) {
+        let area = frame.area();
+        let buf = frame.buffer_mut();
+        let tick = self.bg_tick;
+
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                let pos = Position::new(x, y);
+                if let Some(cell) = buf.cell_mut(pos) {
+                    // Procedural calming wave pattern
+                    let fx = x as f64 * 0.15;
+                    let fy = y as f64 * 0.3;
+                    let ft = tick as f64 * 0.02;
+
+                    let wave1 = ((fx + ft).sin() * 0.5 + 0.5) * 0.4;
+                    let wave2 = ((fy * 0.7 + ft * 1.3).cos() * 0.5 + 0.5) * 0.3;
+                    let wave3 = ((fx * 0.5 + fy * 0.5 + ft * 0.7).sin() * 0.5 + 0.5) * 0.3;
+
+                    let intensity = wave1 + wave2 + wave3;
+
+                    let r = (5.0 + intensity * 12.0) as u8;
+                    let g = (10.0 + intensity * 25.0) as u8;
+                    let b = (15.0 + intensity * 18.0) as u8;
+
+                    cell.set_bg(Color::Rgb(r, g, b));
+                    cell.set_fg(Color::Rgb(
+                        (r as u16 + 15).min(255) as u8,
+                        (g as u16 + 25).min(255) as u8,
+                        (b as u16 + 15).min(255) as u8,
+                    ));
+                }
+            }
+        }
+    }
+
+    fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
+        self.tab_area = area;
+
         let titles: Vec<Line> = Page::ALL
             .iter()
-            .enumerate()
-            .map(|(i, p)| {
+            .map(|p| {
                 Line::from(vec![
+                    Span::styled(" ", Style::default()),
                     Span::styled(
-                        format!("{} ", i + 1),
-                        Style::default().fg(Color::Rgb(100, 200, 100)),
+                        p.title(),
+                        Style::default().fg(Color::Rgb(180, 220, 180)),
                     ),
-                    Span::raw(p.title()),
+                    Span::styled(" ", Style::default()),
                 ])
             })
             .collect();
@@ -423,12 +626,12 @@ impl App {
             .block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(80, 80, 80))
-                    .title(" Grift ")
+                    .border_style(Color::Rgb(60, 80, 60))
+                    .title(" gold.silver.copper ")
                     .title_style(Style::default().fg(Color::Rgb(100, 200, 100)).bold()),
             )
             .select(self.page.index())
-            .style(Style::default().fg(Color::Rgb(180, 180, 180)))
+            .style(Style::default().fg(Color::Rgb(140, 140, 140)))
             .highlight_style(
                 Style::default()
                     .fg(Color::Rgb(100, 200, 100))
@@ -443,13 +646,12 @@ impl App {
     fn render_home(&self, frame: &mut Frame, area: Rect) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Color::Rgb(80, 80, 80))
+            .border_style(Color::Rgb(60, 80, 60))
             .title_bottom(
-                Line::from("│ built with Ratzilla │")
+                Line::from("│ click tabs to navigate │")
                     .alignment(Alignment::Right)
-                    .style(Style::default().fg(Color::Rgb(80, 80, 80))),
-            )
-            .style(Style::default().bg(Color::Rgb(10, 14, 20)));
+                    .style(Style::default().fg(Color::Rgb(60, 80, 60))),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -477,7 +679,7 @@ impl App {
             .block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(60, 60, 60))
+                    .border_style(Color::Rgb(50, 70, 50))
                     .title(" About ".bold().fg(Color::Rgb(100, 200, 100))),
             );
         frame.render_widget(desc, desc_area);
@@ -486,26 +688,29 @@ impl App {
         let nav_text = Text::from(vec![
             Line::from(""),
             Line::from(vec![
-                "  Navigate: ".fg(Color::Rgb(120, 120, 120)),
-                "Tab".fg(Color::Rgb(100, 200, 100)).bold(),
-                " or ".fg(Color::Rgb(120, 120, 120)),
-                "1-5".fg(Color::Rgb(100, 200, 100)).bold(),
-                " to switch pages".fg(Color::Rgb(120, 120, 120)),
+                "  Click the ".fg(Color::Rgb(120, 120, 120)),
+                "tabs above".fg(Color::Rgb(100, 200, 100)).bold(),
+                " to navigate between pages".fg(Color::Rgb(120, 120, 120)),
             ]),
             Line::from(vec![
                 "  Try the ".fg(Color::Rgb(120, 120, 120)),
                 "REPL".fg(Color::Rgb(100, 200, 100)).bold(),
-                " (press ".fg(Color::Rgb(120, 120, 120)),
-                "2".fg(Color::Rgb(100, 200, 100)).bold(),
-                ") to evaluate Grift expressions interactively"
+                " to evaluate Grift expressions interactively"
                     .fg(Color::Rgb(120, 120, 120)),
+            ]),
+            Line::from(vec![
+                "  All ".fg(Color::Rgb(120, 120, 120)),
+                "links".fg(Color::Rgb(100, 200, 100)).bold(),
+                " and ".fg(Color::Rgb(120, 120, 120)),
+                "buttons".fg(Color::Rgb(100, 200, 100)).bold(),
+                " are clickable".fg(Color::Rgb(120, 120, 120)),
             ]),
         ]);
         frame.render_widget(
             Paragraph::new(nav_text).block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(60, 60, 60))
+                    .border_style(Color::Rgb(50, 70, 50))
                     .title(" Navigation ".bold().fg(Color::Rgb(100, 200, 100))),
             ),
             nav_area,
@@ -518,11 +723,10 @@ impl App {
             .border_style(Color::Rgb(100, 200, 100))
             .title(" Grift REPL ".bold().fg(Color::Rgb(100, 200, 100)))
             .title_bottom(
-                Line::from("│ Tab: switch page │ ↑↓: scroll │ Enter: eval │")
+                Line::from("│ Type expressions and press Enter to evaluate │")
                     .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::Rgb(80, 80, 80))),
-            )
-            .style(Style::default().bg(Color::Rgb(10, 14, 20)));
+                    .style(Style::default().fg(Color::Rgb(60, 80, 60))),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -536,9 +740,7 @@ impl App {
             history_lines.push(Line::from(vec![
                 Span::styled(
                     "grift> ",
-                    Style::default()
-                        .fg(Color::Rgb(100, 200, 100))
-                        .bold(),
+                    Style::default().fg(Color::Rgb(100, 200, 100)).bold(),
                 ),
                 Span::styled(input.as_str(), Style::default().fg(Color::Rgb(200, 200, 200))),
             ]));
@@ -559,7 +761,6 @@ impl App {
             ));
         }
 
-        // Calculate scroll
         let visible_height = history_area.height as usize;
         let total_lines = history_lines.len();
         let max_scroll = total_lines.saturating_sub(visible_height);
@@ -570,7 +771,7 @@ impl App {
             .block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(60, 60, 60))
+                    .border_style(Color::Rgb(50, 70, 50))
                     .title(" Output ".fg(Color::Rgb(180, 180, 100))),
             );
         frame.render_widget(history, history_area);
@@ -588,14 +789,14 @@ impl App {
         frame.render_widget(input, input_area);
 
         // Cursor position
-        let cursor_x = input_area.x + 1 + 7 + self.repl_cursor as u16; // 1 border + "grift> "
+        let cursor_x = input_area.x + 1 + 7 + self.repl_cursor as u16;
         let cursor_y = input_area.y + 1;
         if cursor_x < input_area.right() - 1 {
             frame.set_cursor_position(Position::new(cursor_x, cursor_y));
         }
     }
 
-    fn render_docs(&self, frame: &mut Frame, area: Rect) {
+    fn render_docs(&mut self, frame: &mut Frame, area: Rect) {
         let doc_content = match self.doc_page {
             0 => DOC_BASICS,
             1 => DOC_FORMS,
@@ -607,32 +808,25 @@ impl App {
 
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Color::Rgb(80, 80, 80))
+            .border_style(Color::Rgb(60, 80, 60))
             .title(
                 format!(" Documentation: {} ", doc_titles[self.doc_page])
                     .bold()
                     .fg(Color::Rgb(100, 200, 100)),
-            )
-            .title_bottom(
-                Line::from(format!(
-                    "│ ◄ ► : navigate ({}/{}) │",
-                    self.doc_page + 1,
-                    doc_titles.len()
-                ))
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Rgb(80, 80, 80))),
-            )
-            .style(Style::default().bg(Color::Rgb(10, 14, 20)));
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        // Syntax highlight doc content
+        // Split inner into doc content and navigation buttons
+        let [doc_area, nav_bar] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(inner);
+
+        // Render doc content with syntax highlighting
         let lines: Vec<Line> = doc_content
             .lines()
             .map(|line| {
                 if line.starts_with("  (") || line.starts_with("    (") {
-                    // Code lines
                     if let Some((code, comment)) = line.split_once(';') {
                         if let Some((expr, result)) = code.split_once("=>") {
                             Line::from(vec![
@@ -666,7 +860,6 @@ impl App {
                         Line::styled(line, Style::default().fg(Color::Rgb(200, 200, 200)))
                     }
                 } else if line.starts_with("  ") && !line.trim().is_empty() {
-                    // Indented non-code lines (atom descriptions, etc.)
                     if let Some((code, comment)) = line.split_once(';') {
                         Line::from(vec![
                             Span::styled(code, Style::default().fg(Color::Rgb(200, 200, 200))),
@@ -685,15 +878,11 @@ impl App {
                         Line::styled(line, Style::default().fg(Color::Rgb(200, 200, 200)))
                     }
                 } else if line.contains('─') {
-                    // Separator lines
                     Line::styled(line, Style::default().fg(Color::Rgb(100, 200, 100)))
                 } else if !line.trim().is_empty() {
-                    // Section headers
                     Line::styled(
                         line,
-                        Style::default()
-                            .fg(Color::Rgb(100, 200, 100))
-                            .bold(),
+                        Style::default().fg(Color::Rgb(100, 200, 100)).bold(),
                     )
                 } else {
                     Line::from("")
@@ -702,36 +891,84 @@ impl App {
             .collect();
 
         let doc = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
-        frame.render_widget(doc, inner);
+        frame.render_widget(doc, doc_area);
+
+        // Navigation buttons
+        let [prev_area, info_area, next_area] = Layout::horizontal([
+            Constraint::Length(12),
+            Constraint::Min(1),
+            Constraint::Length(12),
+        ])
+        .areas(nav_bar);
+
+        self.doc_nav_prev = prev_area;
+        self.doc_nav_next = next_area;
+
+        let prev_style = if self.doc_page > 0 {
+            Style::default().fg(Color::Rgb(100, 200, 100)).bold()
+        } else {
+            Style::default().fg(Color::Rgb(60, 60, 60))
+        };
+        let next_style = if self.doc_page < 2 {
+            Style::default().fg(Color::Rgb(100, 200, 100)).bold()
+        } else {
+            Style::default().fg(Color::Rgb(60, 60, 60))
+        };
+
+        frame.render_widget(
+            Paragraph::new(" [◄ Prev]").style(prev_style).block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .border_style(Color::Rgb(50, 70, 50)),
+            ),
+            prev_area,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" Page {}/{} ", self.doc_page + 1, doc_titles.len()))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Rgb(100, 100, 100)))
+                .block(
+                    Block::bordered()
+                        .border_type(BorderType::Rounded)
+                        .border_style(Color::Rgb(50, 70, 50)),
+                ),
+            info_area,
+        );
+        frame.render_widget(
+            Paragraph::new(" [Next ►]").style(next_style).block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .border_style(Color::Rgb(50, 70, 50)),
+            ),
+            next_area,
+        );
     }
 
-    fn render_blog(&self, frame: &mut Frame, area: Rect) {
+    fn render_blog(&mut self, frame: &mut Frame, area: Rect) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Color::Rgb(80, 80, 80))
+            .border_style(Color::Rgb(60, 80, 60))
             .title(" Blog ".bold().fg(Color::Rgb(100, 200, 100)))
             .title_bottom(
-                Line::from("│ ↑↓ or ◄►: navigate posts │")
+                Line::from("│ click a post to read │")
                     .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::Rgb(80, 80, 80))),
-            )
-            .style(Style::default().bg(Color::Rgb(10, 14, 20)));
+                    .style(Style::default().fg(Color::Rgb(60, 80, 60))),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
         let [list_area, content_area] =
-            Layout::horizontal([Constraint::Length(30), Constraint::Min(1)]).areas(inner);
+            Layout::horizontal([Constraint::Length(35), Constraint::Min(1)]).areas(inner);
 
-        // Blog list
+        // Blog list - track clickable areas
+        self.blog_item_areas.clear();
         let items: Vec<ListItem> = BLOG_ENTRIES
             .iter()
             .enumerate()
             .map(|(i, (title, date, _))| {
                 let style = if i == self.blog_index {
-                    Style::default()
-                        .fg(Color::Rgb(100, 200, 100))
-                        .bold()
+                    Style::default().fg(Color::Rgb(100, 200, 100)).bold()
                 } else {
                     Style::default().fg(Color::Rgb(150, 150, 150))
                 };
@@ -744,12 +981,26 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items).block(
-            Block::bordered()
-                .border_type(BorderType::Rounded)
-                .border_style(Color::Rgb(60, 60, 60))
-                .title(" Posts ".fg(Color::Rgb(100, 200, 100))),
-        );
+        let list_block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Color::Rgb(50, 70, 50))
+            .title(" Posts ".fg(Color::Rgb(100, 200, 100)));
+
+        let list_inner = list_block.inner(list_area);
+        // Each blog item is 2 lines tall
+        for i in 0..BLOG_ENTRIES.len() {
+            let item_y = list_inner.y + (i as u16 * 2);
+            if item_y + 2 <= list_inner.bottom() {
+                self.blog_item_areas.push(Rect::new(
+                    list_inner.x,
+                    item_y,
+                    list_inner.width,
+                    2,
+                ));
+            }
+        }
+
+        let list = List::new(items).block(list_block);
         frame.render_widget(list, list_area);
 
         // Blog content
@@ -757,14 +1008,12 @@ impl App {
             let mut lines = vec![
                 Line::styled(
                     *title,
-                    Style::default()
-                        .fg(Color::Rgb(100, 200, 100))
-                        .bold(),
+                    Style::default().fg(Color::Rgb(100, 200, 100)).bold(),
                 ),
                 Line::styled(*date, Style::default().fg(Color::Rgb(80, 80, 80))),
                 Line::styled(
                     "─".repeat(content_area.width.saturating_sub(4) as usize),
-                    Style::default().fg(Color::Rgb(60, 60, 60)),
+                    Style::default().fg(Color::Rgb(50, 70, 50)),
                 ),
                 Line::from(""),
             ];
@@ -780,18 +1029,22 @@ impl App {
                 .block(
                     Block::bordered()
                         .border_type(BorderType::Rounded)
-                        .border_style(Color::Rgb(60, 60, 60)),
+                        .border_style(Color::Rgb(50, 70, 50)),
                 );
             frame.render_widget(blog, content_area);
         }
     }
 
-    fn render_links(&self, frame: &mut Frame, area: Rect) {
+    fn render_links(&mut self, frame: &mut Frame, area: Rect) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Color::Rgb(80, 80, 80))
+            .border_style(Color::Rgb(60, 80, 60))
             .title(" Links ".bold().fg(Color::Rgb(100, 200, 100)))
-            .style(Style::default().bg(Color::Rgb(10, 14, 20)));
+            .title_bottom(
+                Line::from("│ click a link to open │")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Rgb(60, 80, 60))),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -803,22 +1056,31 @@ impl App {
         // Links with hyperlinks
         let links_block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Color::Rgb(60, 60, 60))
-            .title(" Repositories ".fg(Color::Rgb(100, 200, 100)));
+            .border_style(Color::Rgb(50, 70, 50))
+            .title(" Repositories & Resources ".fg(Color::Rgb(100, 200, 100)));
 
         let links_inner = links_block.inner(links_area);
         frame.render_widget(links_block, links_area);
 
-        for (i, (_, url)) in LINKS.iter().enumerate() {
-            let link = Hyperlink::new(*url);
+        self.link_areas.clear();
+        for (i, (_label, url)) in LINKS.iter().enumerate() {
             let link_area = Rect::new(links_inner.x, links_inner.y + i as u16, links_inner.width, 1);
             if link_area.y < links_inner.bottom() {
+                // Render hyperlink (makes it clickable via ratzilla)
+                let link = Hyperlink::new(*url);
                 frame.render_widget(link, link_area);
+                self.link_areas.push(link_area);
             }
         }
 
         // Info section
         let info_text = Text::from(vec![
+            Line::from(""),
+            Line::from(vec![
+                "  gold.silver.copper ".fg(Color::Rgb(100, 200, 100)).bold(),
+                "— Software developer & language designer"
+                    .fg(Color::Rgb(150, 150, 150)),
+            ]),
             Line::from(""),
             Line::from(vec![
                 "  Grift ".fg(Color::Rgb(100, 200, 100)).bold(),
@@ -831,13 +1093,17 @@ impl App {
                     .fg(Color::Rgb(150, 150, 150)),
             ]),
             Line::from(vec![
-                "  Ratatui ".fg(Color::Rgb(100, 200, 100)).bold(),
-                "– A Rust library for building TUI applications"
+                "  TachyonFX ".fg(Color::Rgb(100, 200, 100)).bold(),
+                "– Shader-like effects for terminal UIs"
                     .fg(Color::Rgb(150, 150, 150)),
             ]),
             Line::from(""),
             Line::from(
                 "  This website is entirely rendered as a terminal UI in your browser."
+                    .fg(Color::Rgb(100, 100, 100)),
+            ),
+            Line::from(
+                "  Powered by Ratzilla + TachyonFX + WebAssembly."
                     .fg(Color::Rgb(100, 100, 100)),
             ),
         ]);
@@ -847,7 +1113,7 @@ impl App {
                 .block(
                     Block::bordered()
                         .border_type(BorderType::Rounded)
-                        .border_style(Color::Rgb(60, 60, 60))
+                        .border_style(Color::Rgb(50, 70, 50))
                         .title(" Info ".fg(Color::Rgb(100, 200, 100))),
                 ),
             info_area,
@@ -855,25 +1121,36 @@ impl App {
     }
 }
 
+fn open_url(url: &str) {
+    let _ = ratzilla::utils::open_url(url, true);
+}
+
 fn main() -> std::io::Result<()> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
 
     let backend = DomBackend::new().expect("failed to create DOM backend");
-    let terminal = Terminal::new(backend)?;
+    let terminal = ratzilla::ratatui::Terminal::new(backend)?;
 
     let app = Rc::new(RefCell::new(App::new()));
 
     terminal.on_key_event({
         let app = app.clone();
         move |key_event| {
-            app.borrow_mut().handle_event(key_event);
+            app.borrow_mut().handle_key_event(key_event);
+        }
+    });
+
+    terminal.on_mouse_event({
+        let app = app.clone();
+        move |mouse_event| {
+            app.borrow_mut().handle_mouse_event(mouse_event);
         }
     });
 
     terminal.draw_web({
         let app = app.clone();
         move |frame| {
-            app.borrow().draw(frame);
+            app.borrow_mut().draw(frame);
         }
     });
 
