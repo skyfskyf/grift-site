@@ -366,18 +366,18 @@ impl App {
         let col;
         let row;
         {
-            let window = web_sys::window().unwrap();
+            let window = web_sys::window().expect("no global window in WASM context");
             let win_w = window
                 .inner_width()
-                .unwrap()
-                .as_f64()
-                .unwrap_or(1.0)
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(800.0)
                 .max(1.0);
             let win_h = window
                 .inner_height()
-                .unwrap()
-                .as_f64()
-                .unwrap_or(1.0)
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(600.0)
                 .max(1.0);
             let cols = if self.grid_cols == 0 {
                 ratzilla::utils::get_window_size().width
