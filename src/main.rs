@@ -3,12 +3,12 @@ use std::rc::Rc;
 
 use grift::Lisp;
 use ratzilla::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
-use ratzilla::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
+use ratzilla::ratatui::layout::{Alignment, Constraint, Layout, Offset, Position, Rect};
 use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
 use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
 use ratzilla::ratatui::Frame;
-use ratzilla::{DomBackend, WebGl2Backend};
+use ratzilla::DomBackend;
 use ratzilla::WebRenderer;
 
 use tachyonfx::fx::{self};
@@ -29,15 +29,19 @@ const BANNER: &str = r#"
 "#;
 
 const DESCRIPTION: &str = "\
->_ Personal website of gold.silver.copper\n\
+Grift is a minimalistic Lisp implementing Kernel-style vau calculus.\n\
 \n\
-Software developer • Rust enthusiast • Language designer\n\
-\n\
-Interests: programming languages, NLP, AI, game dev, web dev.\n\
-\n\
-Creator of Grift — a minimalistic Lisp implementing vau calculus.\n\
-Features: no_std, no_alloc, arena-allocated, tail-call optimized,\n\
-mark-and-sweep GC, and zero unsafe code.";
+Features:\n\
+  • First-class operatives (fexprs) that subsume functions and macros\n\
+  • no_std, no_alloc — runs on bare-metal embedded systems\n\
+  • Arena-allocated with const-generic capacity\n\
+  • Tail-call optimized with mark-and-sweep GC\n\
+  • Zero unsafe code (#![forbid(unsafe_code)])\n\
+  • Compiles to WebAssembly";
+
+const ABOUT: &str = "\
+>_ gold.silver.copper — Software developer • Rust enthusiast • Language designer\n\
+Interests: programming languages, NLP, AI, game dev, web dev.";
 
 const LINKS: &[(&str, &str)] = &[
     (
@@ -275,8 +279,13 @@ struct App {
     btn_effects: Vec<(Rect, Effect)>,
     // Tab glow effect
     tab_glow_effect: Option<Effect>,
+    // Tab hover effects
+    tab_hover_effects: Vec<(usize, Effect)>,
+    last_hovered_tab: Option<usize>,
     // Banner glow effect
     banner_glow_effect: Option<Effect>,
+    // Banner area tracking for glow effect
+    banner_area: Rect,
 }
 
 impl App {
@@ -310,7 +319,10 @@ impl App {
             doc_nav_next: Rect::default(),
             btn_effects: Vec::new(),
             tab_glow_effect: None,
+            tab_hover_effects: Vec::new(),
+            last_hovered_tab: None,
             banner_glow_effect: None,
+            banner_area: Rect::default(),
         }
     }
 
@@ -687,6 +699,40 @@ impl App {
             }
         }
 
+        // Tab hover translate effect — triggers when a new tab is hovered
+        let current_hovered_tab = self.tab_rects.iter().enumerate()
+            .find(|(_, r)| self.is_hovered(**r))
+            .map(|(i, _)| i);
+        if current_hovered_tab != self.last_hovered_tab {
+            if let Some(idx) = current_hovered_tab {
+                if self.tab_rects.get(idx).is_some() {
+                    let inner_effect = fx::fade_from(
+                        Color::Rgb(60, 65, 80),
+                        Color::Rgb(8, 9, 14),
+                        (300, Interpolation::QuadOut),
+                    );
+                    let hover_fx = fx::translate(
+                        inner_effect,
+                        Offset { x: 0, y: -1 },
+                        (300, Interpolation::QuadOut),
+                    );
+                    self.tab_hover_effects.push((idx, hover_fx));
+                }
+            }
+            self.last_hovered_tab = current_hovered_tab;
+        }
+        // Process tab hover effects
+        self.tab_hover_effects.retain_mut(|(idx, effect)| {
+            if effect.running() {
+                if let Some(tab_rect) = self.tab_rects.get(*idx).copied() {
+                    frame.render_effect(effect, tab_rect, elapsed);
+                }
+                true
+            } else {
+                false
+            }
+        });
+
         match self.page {
             Page::Home => self.render_home(frame, content_area),
             Page::Repl => self.render_repl(frame, content_area),
@@ -720,7 +766,7 @@ impl App {
         });
 
         // Subtle continuous glow on banner when on Home page
-        if self.page == Page::Home {
+        if self.page == Page::Home && self.banner_area.width > 0 {
             if self.banner_glow_effect.is_none() {
                 let fg_shift = [-330.0, 10.0, 8.0];
                 let timer = (2000, Interpolation::SineIn);
@@ -729,8 +775,8 @@ impl App {
                 self.banner_glow_effect = Some(fx::repeating(fx::ping_pong(glow)));
             }
             if let Some(ref mut effect) = self.banner_glow_effect {
-                // Apply to the content area (banner is at the top)
-                frame.render_effect(effect, content_area, elapsed);
+                // Apply only to the banner area, not the entire content area
+                frame.render_effect(effect, self.banner_area, elapsed);
             }
         }
 
@@ -818,13 +864,18 @@ impl App {
                 let fg = if is_selected {
                     Color::Rgb(230, 232, 240)
                 } else if hovered {
-                    Color::Rgb(200, 200, 210)
+                    Color::Rgb(255, 255, 255)
                 } else {
                     Color::Rgb(140, 145, 155)
                 };
+                let style = if hovered && !is_selected {
+                    Style::default().fg(fg).bold().add_modifier(Modifier::UNDERLINED)
+                } else {
+                    Style::default().fg(fg)
+                };
                 Line::from(vec![
                     Span::styled(" ", Style::default()),
-                    Span::styled(p.title(), Style::default().fg(fg)),
+                    Span::styled(p.title(), style),
                     Span::styled(" ", Style::default()),
                 ])
             })
@@ -851,7 +902,7 @@ impl App {
         frame.render_widget(tabs, area);
     }
 
-    fn render_home(&self, frame: &mut Frame, area: Rect) {
+    fn render_home(&mut self, frame: &mut Frame, area: Rect) {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .border_style(Color::Rgb(55, 60, 70))
@@ -866,11 +917,13 @@ impl App {
 
         let banner_height = BANNER.lines().count() as u16;
         let desc_lines = DESCRIPTION.lines().count() as u16;
+        let about_lines = ABOUT.lines().count() as u16;
 
-        let [banner_area, desc_area, repl_area] = Layout::vertical([
+        let [banner_area, desc_area, repl_area, about_area] = Layout::vertical([
             Constraint::Length(banner_height),
             Constraint::Length(desc_lines + 2),
             Constraint::Min(5),
+            Constraint::Length(about_lines + 2),
         ])
         .areas(inner);
 
@@ -879,8 +932,9 @@ impl App {
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(200, 200, 210)).bold());
         frame.render_widget(banner, banner_area);
+        self.banner_area = banner_area;
 
-        // Description
+        // Grift description — main focus
         let desc = Paragraph::new(DESCRIPTION)
             .wrap(Wrap { trim: false })
             .style(Style::default().fg(Color::Rgb(170, 175, 185)))
@@ -888,12 +942,24 @@ impl App {
                 Block::bordered()
                     .border_type(BorderType::Rounded)
                     .border_style(Color::Rgb(40, 44, 52))
-                    .title(" About ".bold().fg(Color::Rgb(200, 200, 210))),
+                    .title(" Grift ".bold().fg(Color::Rgb(184, 115, 51))),
             );
         frame.render_widget(desc, desc_area);
 
-        // Minimal REPL embedded at bottom
+        // Minimal REPL embedded in middle
         self.render_mini_repl(frame, repl_area);
+
+        // Short personal section at bottom
+        let about = Paragraph::new(ABOUT)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(Color::Rgb(140, 145, 155)))
+            .block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .border_style(Color::Rgb(40, 44, 52))
+                    .title(" About ".bold().fg(Color::Rgb(200, 200, 210))),
+            );
+        frame.render_widget(about, about_area);
     }
 
     fn render_repl(&self, frame: &mut Frame, area: Rect) {
@@ -918,7 +984,7 @@ impl App {
         for (input, output) in &self.repl_history {
             history_lines.push(Line::from(vec![
                 Span::styled(
-                    "grift> ",
+                    "Λ> ",
                     Style::default().fg(Color::Rgb(184, 115, 51)).bold(),
                 ),
                 Span::styled(input.as_str(), Style::default().fg(Color::Rgb(200, 200, 210))),
@@ -956,7 +1022,7 @@ impl App {
         frame.render_widget(history, history_area);
 
         // Input
-        let input_display = format!("grift> {}", self.repl_input);
+        let input_display = format!("Λ> {}", self.repl_input);
         let input = Paragraph::new(input_display.as_str())
             .style(Style::default().fg(Color::Rgb(200, 200, 210)))
             .block(
@@ -968,7 +1034,7 @@ impl App {
         frame.render_widget(input, input_area);
 
         // Blinking block cursor
-        self.render_blinking_cursor(frame, input_area.x + 1 + 7 + self.repl_cursor as u16, input_area.y + 1, input_area.right() - 1);
+        self.render_blinking_cursor(frame, input_area.x + 1 + 3 + self.repl_cursor as u16, input_area.y + 1, input_area.right() - 1);
     }
 
     fn render_mini_repl(&self, frame: &mut Frame, area: Rect) {
@@ -999,7 +1065,7 @@ impl App {
             for (input, output) in self.repl_history.iter().rev().take(3).rev() {
                 history_lines.push(Line::from(vec![
                     Span::styled(
-                        "grift> ",
+                    "Λ> ",
                         Style::default().fg(Color::Rgb(184, 115, 51)).bold(),
                     ),
                     Span::styled(input.as_str(), Style::default().fg(Color::Rgb(200, 200, 210))),
@@ -1019,13 +1085,13 @@ impl App {
         frame.render_widget(history, history_area);
 
         // Input line
-        let input_display = format!("grift> {}", self.repl_input);
+        let input_display = format!("Λ> {}", self.repl_input);
         let input = Paragraph::new(input_display.as_str())
             .style(Style::default().fg(Color::Rgb(200, 200, 210)));
         frame.render_widget(input, input_area);
 
         // Blinking block cursor
-        self.render_blinking_cursor(frame, input_area.x + 7 + self.repl_cursor as u16, input_area.y, input_area.right());
+        self.render_blinking_cursor(frame, input_area.x + 3 + self.repl_cursor as u16, input_area.y, input_area.right());
     }
 
     fn render_blinking_cursor(&self, frame: &mut Frame, cursor_x: u16, cursor_y: u16, max_x: u16) {
@@ -1426,7 +1492,7 @@ fn main() -> std::io::Result<()> {
 
     let app = Rc::new(RefCell::new(App::new()));
 
-    // Try WebGL2 first, fall back to Canvas. Never use DOM.
+    // Use DomBackend to enable text selection and copy/paste.
     macro_rules! setup_terminal {
         ($terminal:expr, $app:expr) => {{
             $terminal.on_key_event({
@@ -1444,14 +1510,9 @@ fn main() -> std::io::Result<()> {
         }};
     }
 
-    if let Ok(backend) = WebGl2Backend::new() {
-        let terminal = ratzilla::ratatui::Terminal::new(backend)?;
-        setup_terminal!(terminal, app);
-    } else {
-        let backend = DomBackend::new().expect("failed to create DOM backend");
-        let terminal = ratzilla::ratatui::Terminal::new(backend)?;
-        setup_terminal!(terminal, app);
-    }
+    let backend = DomBackend::new().expect("failed to create DOM backend");
+    let terminal = ratzilla::ratatui::Terminal::new(backend)?;
+    setup_terminal!(terminal, app);
 
     Ok(())
 }
