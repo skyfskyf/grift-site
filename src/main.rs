@@ -8,19 +8,11 @@ use ratzilla::ratatui::style::{Color, Modifier, Style, Stylize};
 use ratzilla::ratatui::text::{Line, Span, Text};
 use ratzilla::ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph, Tabs, Wrap};
 use ratzilla::ratatui::Frame;
-use ratzilla::widgets::Hyperlink;
 use ratzilla::DomBackend;
 use ratzilla::WebRenderer;
 
 use tachyonfx::fx::{self};
 use tachyonfx::{Duration, Effect, EffectRenderer, EffectTimer, Interpolation, Motion, SimpleRng};
-
-/// Approximate pixel width of a single terminal cell in the DomBackend.
-/// Ratzilla uses window_width / 10 for column count.
-const PIXELS_PER_COLUMN: u32 = 10;
-/// Approximate pixel height of a single terminal cell in the DomBackend.
-/// Ratzilla uses window_height / 20 for row count.
-const PIXELS_PER_ROW: u32 = 20;
 
 const BANNER: &str = r#"
  ██████╗  ██████╗ ██╗     ██████╗    ███████╗██╗██╗    ██╗   ██╗███████╗██████╗
@@ -262,6 +254,12 @@ struct App {
     bg_tick: u64,
     rng: SimpleRng,
     last_frame: web_time::Instant,
+    // Grid dimensions (updated each frame from frame.area())
+    grid_cols: u16,
+    grid_rows: u16,
+    // Mouse hover position in grid coordinates
+    hover_col: u16,
+    hover_row: u16,
     // Clickable area tracking
     tab_area: Rect,
     tab_rects: Vec<Rect>,
@@ -287,6 +285,10 @@ impl App {
             bg_tick: 0,
             rng: SimpleRng::default(),
             last_frame: web_time::Instant::now(),
+            grid_cols: 0,
+            grid_rows: 0,
+            hover_col: 0,
+            hover_row: 0,
             tab_area: Rect::default(),
             tab_rects: Vec::new(),
             link_areas: Vec::new(),
@@ -342,6 +344,13 @@ impl App {
         }
     }
 
+    fn is_hovered(&self, area: Rect) -> bool {
+        self.hover_col >= area.x
+            && self.hover_col < area.right()
+            && self.hover_row >= area.y
+            && self.hover_row < area.bottom()
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) {
         match self.page {
             Page::Repl => self.handle_repl_event(key),
@@ -352,10 +361,43 @@ impl App {
     }
 
     fn handle_mouse_event(&mut self, event: MouseEvent) {
+        // Dynamically convert pixel coordinates to grid coordinates using
+        // the actual window dimensions and grid size from the last frame.
+        let col;
+        let row;
+        {
+            let window = web_sys::window().expect("no global window in WASM context");
+            let win_w = window
+                .inner_width()
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(800.0)
+                .max(1.0);
+            let win_h = window
+                .inner_height()
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(600.0)
+                .max(1.0);
+            let cols = if self.grid_cols == 0 {
+                ratzilla::utils::get_window_size().width
+            } else {
+                self.grid_cols
+            };
+            let rows = if self.grid_rows == 0 {
+                ratzilla::utils::get_window_size().height
+            } else {
+                self.grid_rows
+            };
+            col = ((event.x as f64 / win_w) * cols as f64) as u16;
+            row = ((event.y as f64 / win_h) * rows as f64) as u16;
+        }
+
+        // Update hover position on any mouse event
+        self.hover_col = col;
+        self.hover_row = row;
+
         if event.event == MouseEventKind::Pressed && event.button == MouseButton::Left {
-            // Convert pixel coordinates to terminal grid coordinates
-            let col = (event.x / PIXELS_PER_COLUMN) as u16;
-            let row = (event.y / PIXELS_PER_ROW) as u16;
 
             // Check tab clicks using individual tab areas
             if row >= self.tab_area.y && row < self.tab_area.bottom() {
@@ -543,6 +585,10 @@ impl App {
 
         let main_area = frame.area();
 
+        // Store grid dimensions for mouse coordinate conversion
+        self.grid_cols = main_area.width;
+        self.grid_rows = main_area.height;
+
         let [tab_area, content_area] =
             Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(main_area);
 
@@ -609,35 +655,38 @@ impl App {
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
         self.tab_area = area;
 
-        let titles: Vec<Line> = Page::ALL
-            .iter()
-            .map(|p| {
-                Line::from(vec![
-                    Span::styled(" ", Style::default()),
-                    Span::styled(
-                        p.title(),
-                        Style::default().fg(Color::Rgb(192, 192, 185)),
-                    ),
-                    Span::styled(" ", Style::default()),
-                ])
-            })
-            .collect();
-
-        // Compute individual tab click areas based on actual rendered positions.
-        // Tabs widget renders: padding(1) + title_line + padding(1) for each tab,
-        // separated by a divider. The block border adds 1 column on each side.
-        let divider_width: u16 = 3; // " │ "
-        let tab_padding: u16 = 2; // Tabs widget adds 1 space on each side (total 2)
-        let inner_x = area.x + 1; // skip left border
-        let tab_row = area.y + 1; // the tabs render on the second row (inside border)
+        // Compute individual tab click areas from the Tabs widget layout.
+        // Each tab renders as: padding(1) + " title " + padding(1), with " │ " dividers.
+        let divider_width: u16 = 3;
+        let tab_padding: u16 = 2;
+        let inner_x = area.x + 1;
+        let tab_row = area.y + 1;
         self.tab_rects.clear();
         let mut pos = inner_x;
         for p in &Page::ALL {
-            let title_len = p.title().len() as u16 + 2; // title text + 2 spaces from Line(" " + title + " ")
+            let title_len = p.title().len() as u16 + 2;
             let total = title_len + tab_padding;
             self.tab_rects.push(Rect::new(pos, tab_row, total, 1));
             pos += total + divider_width;
         }
+
+        let titles: Vec<Line> = Page::ALL
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let hovered = self.tab_rects.get(i).is_some_and(|r| self.is_hovered(*r));
+                let fg = if hovered && self.page.index() != i {
+                    Color::Rgb(207, 181, 59)
+                } else {
+                    Color::Rgb(192, 192, 185)
+                };
+                Line::from(vec![
+                    Span::styled(" ", Style::default()),
+                    Span::styled(p.title(), Style::default().fg(fg)),
+                    Span::styled(" ", Style::default()),
+                ])
+            })
+            .collect();
 
         let tabs = Tabs::new(titles)
             .block(
@@ -921,22 +970,46 @@ impl App {
         self.doc_nav_prev = prev_area;
         self.doc_nav_next = next_area;
 
-        let prev_style = if self.doc_page > 0 {
+        let prev_hovered = self.doc_page > 0 && self.is_hovered(prev_area);
+        let next_hovered = self.doc_page < 2 && self.is_hovered(next_area);
+
+        let prev_style = if prev_hovered {
+            Style::default()
+                .fg(Color::Rgb(207, 181, 59))
+                .bold()
+                .add_modifier(Modifier::UNDERLINED)
+        } else if self.doc_page > 0 {
             Style::default().fg(Color::Rgb(207, 181, 59)).bold()
         } else {
             Style::default().fg(Color::Rgb(60, 50, 30))
         };
-        let next_style = if self.doc_page < 2 {
+        let next_style = if next_hovered {
+            Style::default()
+                .fg(Color::Rgb(207, 181, 59))
+                .bold()
+                .add_modifier(Modifier::UNDERLINED)
+        } else if self.doc_page < 2 {
             Style::default().fg(Color::Rgb(207, 181, 59)).bold()
         } else {
             Style::default().fg(Color::Rgb(60, 50, 30))
+        };
+
+        let prev_border = if prev_hovered {
+            Color::Rgb(207, 181, 59)
+        } else {
+            Color::Rgb(50, 40, 25)
+        };
+        let next_border = if next_hovered {
+            Color::Rgb(207, 181, 59)
+        } else {
+            Color::Rgb(50, 40, 25)
         };
 
         frame.render_widget(
             Paragraph::new(" [◄ Prev]").style(prev_style).block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(50, 40, 25)),
+                    .border_style(prev_border),
             ),
             prev_area,
         );
@@ -955,7 +1028,7 @@ impl App {
             Paragraph::new(" [Next ►]").style(next_style).block(
                 Block::bordered()
                     .border_type(BorderType::Rounded)
-                    .border_style(Color::Rgb(50, 40, 25)),
+                    .border_style(next_border),
             ),
             next_area,
         );
@@ -979,32 +1052,15 @@ impl App {
             Layout::horizontal([Constraint::Length(35), Constraint::Min(1)]).areas(inner);
 
         // Blog list - track clickable areas
-        self.blog_item_areas.clear();
-        let items: Vec<ListItem> = BLOG_ENTRIES
-            .iter()
-            .enumerate()
-            .map(|(i, (title, date, _))| {
-                let style = if i == self.blog_index {
-                    Style::default().fg(Color::Rgb(207, 181, 59)).bold()
-                } else {
-                    Style::default().fg(Color::Rgb(160, 150, 130))
-                };
-                let marker = if i == self.blog_index { "▶ " } else { "  " };
-                ListItem::new(vec![
-                    Line::from(format!("{marker}{title}")).style(style),
-                    Line::from(format!("  {date}"))
-                        .style(Style::default().fg(Color::Rgb(100, 90, 70))),
-                ])
-            })
-            .collect();
-
         let list_block = Block::bordered()
             .border_type(BorderType::Rounded)
             .border_style(Color::Rgb(50, 40, 25))
             .title(" Posts ".fg(Color::Rgb(207, 181, 59)));
 
         let list_inner = list_block.inner(list_area);
-        // Each blog item is 2 lines tall
+
+        // Compute item areas first so hover state is available during rendering
+        self.blog_item_areas.clear();
         for i in 0..BLOG_ENTRIES.len() {
             let item_y = list_inner.y + (i as u16 * 2);
             if item_y + 2 <= list_inner.bottom() {
@@ -1016,6 +1072,36 @@ impl App {
                 ));
             }
         }
+
+        let items: Vec<ListItem> = BLOG_ENTRIES
+            .iter()
+            .enumerate()
+            .map(|(i, (title, date, _))| {
+                let hovered = self
+                    .blog_item_areas
+                    .get(i)
+                    .is_some_and(|r| self.is_hovered(*r));
+                let style = if i == self.blog_index {
+                    Style::default().fg(Color::Rgb(207, 181, 59)).bold()
+                } else if hovered {
+                    Style::default().fg(Color::Rgb(207, 181, 59))
+                } else {
+                    Style::default().fg(Color::Rgb(160, 150, 130))
+                };
+                let marker = if i == self.blog_index {
+                    "▶ "
+                } else if hovered {
+                    "▷ "
+                } else {
+                    "  "
+                };
+                ListItem::new(vec![
+                    Line::from(format!("{marker}{title}")).style(style),
+                    Line::from(format!("  {date}"))
+                        .style(Style::default().fg(Color::Rgb(100, 90, 70))),
+                ])
+            })
+            .collect();
 
         let list = List::new(items).block(list_block);
         frame.render_widget(list, list_area);
@@ -1080,12 +1166,23 @@ impl App {
         frame.render_widget(links_block, links_area);
 
         self.link_areas.clear();
-        for (i, (_label, url)) in LINKS.iter().enumerate() {
+        for (i, (label, _url)) in LINKS.iter().enumerate() {
             let link_area = Rect::new(links_inner.x, links_inner.y + i as u16, links_inner.width, 1);
             if link_area.y < links_inner.bottom() {
-                // Render hyperlink (makes it clickable via ratzilla)
-                let link = Hyperlink::new(*url);
-                frame.render_widget(link, link_area);
+                let hovered = self.is_hovered(link_area);
+                let style = if hovered {
+                    Style::default()
+                        .fg(Color::Rgb(207, 181, 59))
+                        .bold()
+                        .add_modifier(Modifier::UNDERLINED)
+                } else {
+                    Style::default()
+                        .fg(Color::Rgb(100, 180, 220))
+                        .add_modifier(Modifier::UNDERLINED)
+                };
+                let marker = if hovered { "▶ " } else { "  " };
+                let text = Paragraph::new(format!("{marker}{label}")).style(style);
+                frame.render_widget(text, link_area);
                 self.link_areas.push(link_area);
             }
         }
