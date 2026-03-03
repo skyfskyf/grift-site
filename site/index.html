@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grift REPL</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #1e1e2e;
+      --surface: #181825;
+      --border: #313244;
+      --text: #cdd6f4;
+      --subtext: #a6adc8;
+      --green: #a6e3a1;
+      --red: #f38ba8;
+      --blue: #89b4fa;
+      --yellow: #f9e2af;
+      --prompt: #cba6f7;
+      --font: "Fira Code", "Cascadia Code", "Consolas", monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      color: var(--prompt);
+      letter-spacing: 0.05em;
+    }
+
+    header p {
+      color: var(--subtext);
+      font-size: 0.85rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: var(--border);
+      padding: 0.2rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      color: var(--blue);
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.5rem;
+      gap: 1rem;
+    }
+
+    #terminal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 400px;
+      max-height: 60vh;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .line {
+      display: flex;
+      gap: 0.5rem;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .line .prompt { color: var(--prompt); user-select: none; white-space: nowrap; }
+    .line .input-text { color: var(--text); }
+    .line .output { color: var(--green); }
+    .line .error  { color: var(--red); }
+    .line .info   { color: var(--subtext); font-style: italic; }
+
+    #input-row {
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 1rem;
+      gap: 0.5rem;
+    }
+
+    #input-row .prompt { color: var(--prompt); white-space: nowrap; user-select: none; }
+
+    #input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      caret-color: var(--prompt);
+    }
+
+    #input::placeholder { color: var(--subtext); opacity: 0.5; }
+
+    .examples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .examples span {
+      color: var(--subtext);
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    .ex-btn {
+      background: var(--border);
+      border: none;
+      color: var(--yellow);
+      font-family: var(--font);
+      font-size: 0.8rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .ex-btn:hover { background: #45475a; }
+
+    footer {
+      text-align: center;
+      padding: 1rem;
+      color: var(--subtext);
+      font-size: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    #status {
+      color: var(--subtext);
+      font-size: 0.8rem;
+      text-align: right;
+    }
+    #status.ready  { color: var(--green); }
+    #status.loading { color: var(--yellow); }
+    #status.error   { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>λ Grift</h1>
+      <p>A no_std · no_alloc · no_unsafe Scheme for embedded devices</p>
+    </div>
+    <div class="badge">WASM REPL</div>
+    <div id="status" class="loading">⏳ Loading…</div>
+  </header>
+
+  <main>
+    <div id="terminal" aria-live="polite" aria-label="REPL output"></div>
+
+    <div id="input-row">
+      <span class="prompt">Λ&gt;</span>
+      <input
+        id="input"
+        type="text"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        placeholder="Type a Grift expression…"
+        disabled
+      />
+    </div>
+
+    <div class="examples">
+      <span>Try:</span>
+      <button class="ex-btn" data-expr="(+ 1 2)">(+ 1 2)</button>
+      <button class="ex-btn" data-expr="(define fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))">(define fact …)</button>
+      <button class="ex-btn" data-expr="(fact 10)">(fact 10)</button>
+      <button class="ex-btn" data-expr="(map (lambda (x) (* x x)) (list 1 2 3 4 5))">(map square …)</button>
+      <button class="ex-btn" data-expr='(string-append "hello" " " "world")'>(string-append …)</button>
+      <button class="ex-btn" data-expr="(let ((x 10) (y 20)) (+ x y))">(let …)</button>
+    </div>
+  </main>
+
+  <footer>
+    <a href="https://github.com/skyfskyf/grift" target="_blank" rel="noopener">grift</a>
+    · powered by WebAssembly ·
+    <a href="https://github.com/skyfskyf/grift-site" target="_blank" rel="noopener">source</a>
+  </footer>
+
+  <script type="module">
+    import init, { GriftRepl } from './pkg/grift_wasm.js';
+
+    const terminal = document.getElementById('terminal');
+    const inputEl  = document.getElementById('input');
+    const statusEl = document.getElementById('status');
+
+    let repl = null;
+    let history = [];
+    let histIdx  = -1;
+
+    function appendLine(type, promptText, content) {
+      const row = document.createElement('div');
+      row.className = 'line';
+      if (promptText) {
+        const p = document.createElement('span');
+        p.className = 'prompt';
+        p.textContent = promptText;
+        row.appendChild(p);
+      }
+      const c = document.createElement('span');
+      c.className = type;
+      c.textContent = content;
+      row.appendChild(c);
+      terminal.appendChild(row);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function evalInput(expr) {
+      expr = expr.trim();
+      if (!expr) return;
+
+      appendLine('input-text', 'Λ>', expr);
+      history.unshift(expr);
+      histIdx = -1;
+
+      if (!repl) {
+        appendLine('error', '', 'REPL not ready yet.');
+        return;
+      }
+
+      const result = repl.eval(expr);
+      if (result === '' || result === '#inert') {
+        // suppress empty / inert results silently
+      } else if (result.startsWith('error:')) {
+        appendLine('error', '', result);
+      } else {
+        appendLine('output', '', result);
+      }
+    }
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = inputEl.value;
+        inputEl.value = '';
+        evalInput(val);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (histIdx < history.length - 1) {
+          histIdx++;
+          inputEl.value = history[histIdx];
+          requestAnimationFrame(() => {
+            inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+          });
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (histIdx > 0) {
+          histIdx--;
+          inputEl.value = history[histIdx];
+        } else {
+          histIdx = -1;
+          inputEl.value = '';
+        }
+      }
+    });
+
+    document.querySelectorAll('.ex-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        inputEl.value = btn.dataset.expr;
+        inputEl.focus();
+      });
+    });
+
+    // Load WASM
+    try {
+      await init();
+      repl = new GriftRepl();
+      statusEl.textContent = '✓ Ready';
+      statusEl.className = 'ready';
+      inputEl.disabled = false;
+      inputEl.focus();
+      appendLine('info', '', 'Grift REPL loaded. Type an expression and press Enter.');
+    } catch (err) {
+      statusEl.textContent = '✗ Failed to load';
+      statusEl.className = 'error';
+      appendLine('error', '', `Failed to load WASM: ${err}`);
+      console.error(err);
+    }
+  </script>
+</body>
+</html>
