@@ -1,0 +1,94 @@
+---
+title: Grift REPL Demo
+description: Interactive Grift interpreter powered by bevy_ratatui, compiled to WebAssembly.
+template: splash
+---
+
+import GriftRepl from '../../components/GriftRepl.astro';
+
+## Interactive Grift REPL
+
+<GriftRepl />
+
+## About This Demo
+
+This REPL is a **bevy_ratatui** application compiled to WebAssembly. It runs the
+full Grift interpreter directly in your browser — no server required. The terminal
+UI is rendered using [Ratatui](https://ratatui.rs) via the
+[bevy_ratatui](https://github.com/ratatui/bevy_ratatui) windowed backend, with
+[Bevy](https://bevyengine.org) managing the update loop and input handling.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────┐
+│              Browser (WASM)             │
+│  ┌───────────────────────────────────┐  │
+│  │          Bevy App Loop            │  │
+│  │  ┌─────────────┐ ┌────────────┐  │  │
+│  │  │ bevy_ratatui │ │   Grift    │  │  │
+│  │  │  (windowed)  │ │ Evaluator  │  │  │
+│  │  └──────┬───────┘ └─────┬──────┘  │  │
+│  │         │               │         │  │
+│  │    ┌────▼────┐    ┌─────▼─────┐   │  │
+│  │    │ Ratatui │    │   Arena   │   │  │
+│  │    │ Widgets │    │ Allocator │   │  │
+│  │    └─────────┘    └───────────┘   │  │
+│  └───────────────────────────────────┘  │
+│                  │                      │
+│            ┌─────▼─────┐                │
+│            │  Canvas /  │                │
+│            │  WebGL     │                │
+│            └────────────┘                │
+└─────────────────────────────────────────┘
+```
+
+### Try These Examples
+
+```lisp
+;; Basic arithmetic
+(+ 1 2 3)              ; → 6
+(* 2 (+ 3 4))          ; → 14
+
+;; Define variables and functions
+(define! x 42)
+(define! double (lambda (n) (* n 2)))
+(double x)              ; → 84
+
+;; Vau operatives — the core of Grift
+(define! my-quote (vau (x) #ignore x))
+(my-quote (+ 1 2))     ; → (+ 1 2)
+
+;; Lists and pairs
+(cons 1 (cons 2 (cons 3 ())))  ; → (1 2 3)
+(car '(a b c))                  ; → a
+(cdr '(a b c))                  ; → (b c)
+
+;; Tail-recursive fibonacci
+(define! fib (lambda (n a b)
+  (if (= n 0) a
+    (fib (- n 1) b (+ a b)))))
+(fib 50 0 1)            ; → 12586269025
+
+;; Higher-order functions
+(define! map (lambda (f lst)
+  (if (null? lst) ()
+    (cons (f (car lst)) (map f (cdr lst))))))
+(map double '(1 2 3 4))  ; → (2 4 6 8)
+```
+
+### Building from Source
+
+To compile the REPL WASM module from source:
+
+```bash
+# Clone the grift repository
+git clone https://github.com/skyfskyf/grift.git
+cd grift
+
+# Build the WASM REPL (requires wasm-pack)
+wasm-pack build --target web crates/grift-repl
+
+# Copy the output to grift-site/public/wasm/
+cp pkg/* ../grift-site/public/wasm/
+```

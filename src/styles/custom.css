@@ -1,0 +1,159 @@
+/* Custom styles for the grift-site */
+
+:root {
+  --sl-color-accent-low: #1a1a2e;
+  --sl-color-accent: #7c3aed;
+  --sl-color-accent-high: #c4b5fd;
+  --sl-color-white: #f8f8f2;
+  --sl-color-gray-1: #e0def4;
+  --sl-color-gray-2: #908caa;
+  --sl-color-gray-3: #6e6a86;
+  --sl-color-gray-4: #44415a;
+  --sl-color-gray-5: #2a283e;
+  --sl-color-gray-6: #1f1d2e;
+  --sl-color-black: #191724;
+}
+
+/* Terminal-style code blocks */
+:root[data-theme="dark"] pre {
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 8px;
+}
+
+/* REPL container styling */
+.repl-container {
+  background: #1a1a2e;
+  border: 2px solid var(--sl-color-accent);
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+.repl-header {
+  background: var(--sl-color-accent);
+  color: white;
+  padding: 0.5rem 1rem;
+  font-family: monospace;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.repl-header .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.repl-header .dot.red { background: #ff5f56; }
+.repl-header .dot.yellow { background: #ffbd2e; }
+.repl-header .dot.green { background: #27c93f; }
+
+.repl-body {
+  min-height: 400px;
+  position: relative;
+}
+
+.repl-body canvas {
+  width: 100%;
+  height: 400px;
+  display: block;
+}
+
+/* Feature cards */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.feature-card {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: border-color 0.2s;
+}
+
+.feature-card:hover {
+  border-color: var(--sl-color-accent);
+}
+
+.feature-card h3 {
+  margin-top: 0;
+  color: var(--sl-color-accent-high);
+}
+
+/* Project cards */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.project-card {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.project-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--sl-color-accent);
+}
+
+.project-card .project-content {
+  padding: 1.5rem;
+}
+
+.project-card h3 {
+  margin-top: 0;
+}
+
+.project-card .tag {
+  display: inline-block;
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  margin-right: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Blog post list */
+.blog-list {
+  list-style: none;
+  padding: 0;
+}
+
+.blog-list li {
+  border-bottom: 1px solid var(--sl-color-gray-4);
+  padding: 1.5rem 0;
+}
+
+.blog-list li:last-child {
+  border-bottom: none;
+}
+
+.blog-list .post-date {
+  color: var(--sl-color-gray-2);
+  font-size: 0.875rem;
+}
+
+.blog-list .post-title {
+  font-size: 1.25rem;
+  margin: 0.25rem 0;
+}
+
+.blog-list .post-excerpt {
+  color: var(--sl-color-gray-2);
+  margin: 0.5rem 0 0;
+}

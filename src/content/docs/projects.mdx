@@ -1,0 +1,75 @@
+---
+title: Projects
+description: Open source libraries and tools.
+template: splash
+---
+
+## Libraries & Tools
+
+<div class="project-grid">
+<div class="project-card">
+<div class="project-content">
+
+### [Grift](https://github.com/skyfskyf/grift)
+
+A vau-calculus Lisp interpreter suitable for bare metal devices and embedded use.
+Implements first-class operatives (fexprs) that subsume both functions and macros,
+with a fixed-size arena allocator, mark-and-sweep GC, and tail-call optimization.
+
+<span class="tag">Rust</span>
+<span class="tag">no_std</span>
+<span class="tag">Lisp</span>
+<span class="tag">Vau Calculus</span>
+
+**Features:**
+- `no_std`, `no_alloc`, `#![forbid(unsafe_code)]`
+- Fixed-size arena with free-list allocation
+- First-class operatives (fexprs) via vau calculus
+- Tail-call optimization via trampoline
+- Mark-and-sweep garbage collection
+- Checked integer arithmetic
+
+</div>
+</div>
+
+<div class="project-card">
+<div class="project-content">
+
+### [bevy_ratatui](https://github.com/ratatui/bevy_ratatui)
+
+Set up a Ratatui terminal UI application using Bevy to manage the update loop,
+handle input events, and draw to the buffer. Supports both terminal and windowed
+rendering modes.
+
+<span class="tag">Rust</span>
+<span class="tag">Bevy</span>
+<span class="tag">Ratatui</span>
+<span class="tag">TUI</span>
+
+**Features:**
+- Bevy-powered update loop for terminal applications
+- Crossterm input event forwarding
+- Optional windowed rendering mode
+- WASM-compatible for browser deployment
+
+</div>
+</div>
+</div>
+
+## Demos
+
+<div class="project-grid">
+<div class="project-card">
+<div class="project-content">
+
+### [Grift REPL](/grift-site/demo/)
+
+An interactive Grift interpreter running in your browser. Powered by bevy_ratatui
+compiled to WebAssembly, it provides a full terminal-style REPL experience with
+syntax highlighting and expression evaluation.
+
+[**Try the REPL →**](/grift-site/demo/)
+
+</div>
+</div>
+</div>

@@ -1,0 +1,78 @@
+---
+title: Welcome to Grift
+description: A vau-calculus Lisp interpreter for embedded systems — no_std, no_alloc, no unsafe code.
+template: splash
+hero:
+  title: Grift
+  tagline: A vau-calculus Lisp interpreter for embedded systems — no_std, no_alloc, no unsafe code
+  image:
+    alt: Grift logo
+    html: <img src="/grift-site/favicon.svg" alt="Grift logo" width="128" height="128" />
+  actions:
+    - text: Try the REPL
+      link: /grift-site/demo/
+      icon: right-arrow
+      variant: primary
+    - text: Read the Docs
+      link: /grift-site/language/getting-started/
+      icon: open-book
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/skyfskyf/grift
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Features
+
+<CardGrid>
+  <Card title="First-class Operatives" icon="rocket">
+    Vau calculus (fexprs) subsume both functions and macros. Operatives receive unevaluated operands and the caller's environment.
+  </Card>
+  <Card title="no_std, no_alloc" icon="setting">
+    Runs on bare metal. Fixed-size arena allocator with const-generic capacity. No heap allocation, no standard library.
+  </Card>
+  <Card title="Zero Unsafe Code" icon="approve-check">
+    `#![forbid(unsafe_code)]` across all crates. Memory safety guaranteed by the Rust type system.
+  </Card>
+  <Card title="Tail-Call Optimization" icon="random">
+    Trampoline-based TCO allows unbounded tail recursion without growing the Rust stack.
+  </Card>
+  <Card title="Mark-and-Sweep GC" icon="seti:db">
+    Garbage collector uses mark bitmap and mark stack on the Rust stack — no arena allocation needed for GC.
+  </Card>
+  <Card title="WASM Ready" icon="laptop">
+    Compile to WebAssembly for browser-based REPLs. The grift evaluator runs entirely in WASM with bevy_ratatui for the terminal UI.
+  </Card>
+</CardGrid>
+
+## Quick Start
+
+```rust
+use grift::{Lisp, Value};
+
+let lisp: Lisp<20000> = Lisp::new();
+
+assert_eq!(lisp.eval("(+ 1 2)"), Ok(Value::Number(3)));
+assert_eq!(lisp.eval("(car (cons 1 2))"), Ok(Value::Number(1)));
+```
+
+## A Taste of Grift
+
+```lisp
+;; vau creates an operative (fexpr) — operands are not evaluated
+(define! my-quote (vau (x) #ignore x))
+(my-quote (+ 1 2))   ; → (+ 1 2), not 3
+
+;; lambda is sugar for (wrap (vau params #ignore body))
+(define! double (lambda (x) (* x 2)))
+(double 5)            ; → 10
+
+;; Tail-recursive fibonacci
+(define! fib (lambda (n a b)
+  (if (= n 0) a
+    (fib (- n 1) b (+ a b)))))
+(fib 50 0 1)          ; → 12586269025
+```
